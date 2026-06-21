@@ -37,8 +37,8 @@
     <div id="me" class="mono muted" style="font-size:.75rem; word-break:break-all"></div>
 
     <h3>Join</h3>
-    <input id="url" value="wss://fnlr.se/4802f621018e1968/signal" />
-    <input id="net" value="spike-room" placeholder="network name" />
+    <input id="url" placeholder="signaling URL" />
+    <input id="net" placeholder="network name" />
     <button id="join" class="primary">Connect</button>
 
     <h3>You</h3>
@@ -78,6 +78,7 @@
 
   <script src="vendor/sodium.bundle.js"></script>
   <script src="yaw2.js"></script>
+  <script src="config.js"></script><!-- deployment config (gitignored); see config.example.js -->
   <script>
     const $ = (id) => document.getElementById(id);
     const log = $('log');
@@ -87,6 +88,13 @@
     }
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
     const short = (id) => esc((id || '').slice(0, 12)) + '…';
+
+    // Deployment defaults come from config.js (gitignored), never the repo.
+    (() => {
+      const c = window.YAW_CONFIG || {};
+      if (c.signalURL && !$('url').value) $('url').value = c.signalURL;
+      if (c.defaultNet && !$('net').value) $('net').value = c.defaultNet;
+    })();
 
     let node = null, ident = null;
     const untrusted = new Set();

@@ -13,6 +13,7 @@ deploy/anchor.env
 *.pem
 yawdata/
 .yaw/
+web/config.js
 
 # Node / Rust / build artifacts
 node_modules/
