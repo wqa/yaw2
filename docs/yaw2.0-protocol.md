@@ -1,7 +1,13 @@
-# YAW/2 — Protocol Specification
+# YAW/2.0 — Protocol Specification
 
-**Version:** `yaw/2.0` · **Status:** draft for implementation · clean break from
-WASTE 1.x (no wire-compatibility).
+**Version:** `yaw/2.0` · **Status:** 🔒 **LOCKED** (frozen wire — interop baseline)
+· clean break from WASTE 1.x.
+
+> **This document is frozen.** Independent implementations interoperate against
+> this exact wire and the live server. Do **not** change 2.0. New protocol work —
+> currently forward-secret signaling — lives in
+> [yaw2.1-protocol.md](yaw2.1-protocol.md), motivated by
+> [YIP-0001](proposals/yip-0001-forward-secret-signaling.md). See [README](README.md).
 
 YAW/2 is a small, trusted, peer-to-peer encrypted mesh — chat, presence, and file
 transfer — that pierces NAT the way the modern web does (ICE) and rides a modern
@@ -92,8 +98,19 @@ The anchor has **two** jobs and sees **no** user data:
 
 ## 5. Signaling protocol (WebSocket, JSON)
 
-One WebSocket per node. All frames are JSON objects with a `type`. Binary blobs
-(signatures, sealed boxes) are lowercase hex or base64 as noted.
+One WebSocket per node. All frames are **UTF-8 text** JSON objects with a `type`
+(binary WebSocket frames are ignored).
+
+**Encoding conventions (apply everywhere unless stated):**
+
+- **hex** = lowercase, no separators.
+- **base64** = standard RFC 4648 **with padding** (libsodium `base64_variants.ORIGINAL`
+  — *not* the url-safe / no-padding default).
+- **`net`** = `hex(sha256(b))` where `b = utf8("yaw2-net:" + name)`; the name is taken
+  **verbatim** (case-sensitive, no normalization/trimming).
+- **`id`** = `hex(ed25519_public_key)` (32 bytes → 64 hex).
+- Signature inputs are raw bytes (concatenated as written); signatures are Ed25519
+  detached (64 bytes), hex-encoded.
 
 ### 5.1 Join (authentication)
 
@@ -101,13 +118,17 @@ One WebSocket per node. All frames are JSON objects with a `type`. Binary blobs
 server → { "v":"yaw/2.0", "type":"challenge", "nonce":"<32-byte hex>" }
 client → { "type":"join",
            "id":   "<ed25519 pubkey hex>",
-           "net":  "<sha256 hex of 'yaw2-net:'+name>",
-           "sig":  "<ed25519 sig over (nonce_bytes || net_bytes), hex>" }
+           "net":  "<net hex>",
+           "sig":  "<ed25519 sig, hex>" }
 server → { "type":"joined", "peers":[ "<id>", ... ] }   // current members of net
 ```
 
-The server verifies `sig` against `id`, then registers the socket under
-`(net, id)`. A node may join only one `net` per socket. Bad signature → close.
+`sig` is over the **exact bytes** `nonce_raw || net_ascii`, where `nonce_raw =
+hex_decode(nonce)` (32 bytes) and `net_ascii = utf8(net)` (the 64 ASCII hex
+chars). The server verifies `sig` against `id`, then registers the socket under
+`(net, id)`. A node may join only one `net` per socket. Bad signature → the server
+closes with code **4001**; a second connection for the same `(net, id)` displaces
+the first with code **4002**.
 
 ### 5.2 Presence
 
@@ -131,14 +152,17 @@ the server replies `{ "type":"no-peer", "to":"<id>" }`.
 
 ### 5.4 Sealed payload (inside `box`)
 
-`box = crypto_box(plaintext, nonce, recipient_x25519_pub, sender_x25519_priv)`,
-serialized as `base64(nonce(24) || ciphertext)`. The recipient opens it with the
-sender's X25519 public key (derived from the `from` id). `plaintext` is JSON:
+`box = crypto_box(plaintext, nonce, recipient_x25519_pub, sender_x25519_priv)`
+(X25519 + XSalsa20-Poly1305), serialized as **`base64(nonce(24) || mac(16) ||
+ciphertext)`** (i.e. the 24-byte nonce prepended to libsodium's combined-mode
+output; PyNaCl's `Box.encrypt(msg, nonce)` already produces exactly this). The
+X25519 keys are derived from the Ed25519 identities (§3); the recipient uses the
+sender's, taken from the `from` id. `plaintext` is JSON:
 
 ```
 { "kind": "offer" | "answer" | "candidate" | "bye",
-  "sdp":  "<full SDP>",            // for offer/answer
-  "cand": "<ICE candidate line>", "mid":"0", "mline":0 }  // for candidate (trickle)
+  "sdp":  "<full SDP>",            // for offer/answer (candidates embedded; see §6)
+  "cand": "<ICE candidate line>", "mid":"0", "mline":0 }  // optional trickle (§6)
 ```
 
 Because the box is authenticated by the sender's identity key, a received offer's
@@ -155,31 +179,46 @@ keyring**. (Untrusted `id` → ignore, or hold for manual accept.)
 ```
 A = offerer (smaller id)                         B = answerer
 ───────────────────────────────                  ───────────────────────────────
-pc = RTCPeerConnection({iceServers:[stun]})
-dc = pc.createDataChannel("yaw",                 pc = RTCPeerConnection({iceServers:[stun]})
-        {ordered:true})                          pc.ondatachannel = …
-offer = pc.createOffer(); setLocalDescription
-seal(offer) ─────────────"to B"────────────────▶ verify from∈keyring; setRemoteDescription
-                                                  answer = createAnswer(); setLocalDescription
-verify; setRemoteDescription ◀──"to A"─seal(answer)
-  ⇄  trickle ICE candidates both ways as sealed {kind:"candidate"}  ⇄
+pc = RTCPeerConnection({iceServers:[stun]})      pc = RTCPeerConnection({iceServers:[stun]})
+dc = pc.createDataChannel("yaw")                 pc.ondatachannel = …
+createOffer; setLocalDescription
+WAIT for ICE gathering complete  ◀── candidates embedded in SDP (non-trickle)
+seal(offer.sdp) ─────────"to B"────────────────▶ verify from∈keyring; setRemoteDescription
+                                                  createAnswer; setLocalDescription
+                                                  WAIT for ICE gathering complete
+verify; setRemoteDescription ◀──"to A"─seal(answer.sdp)
         ICE connectivity checks (host + srflx)  →  DTLS handshake
                        "yaw" DataChannel opens on both sides
 ───────────────── identity confirm (mandatory) ─────────────────
 each side, on open, sends on "yaw":
-  { "type":"hello", "id":"<self id>", "nick":"…", "caps":[…],
-    "sig":"<ed25519 over ('yaw/2 bind'||local_dtls_fp||remote_dtls_fp)>" }
-each verifies the peer's sig against its known id AND the actual DTLS
-fingerprints (from the SDP). Mismatch → close the connection.
+  { "type":"hello", "id":"<self id>", "nick":"…", "sig":"<hex>" }
+verify (below). Mismatch → close the connection.
 ```
 
-After `hello` verification the session is **trusted and live**. `dtls_fp` is the
-SHA-256 fingerprint from the SDP `a=fingerprint` line (32 bytes).
+**ICE is non-trickle (baseline).** After `setLocalDescription`, wait until ICE
+gathering is `complete`, then send the SDP with candidates embedded. Sending extra
+`{kind:"candidate"}` messages is **optional** and additive; receivers MUST accept
+candidates from the SDP and SHOULD accept trickled ones. Gather **host +
+server-reflexive** (STUN) candidates; no TURN. If ICE fails (both behind symmetric
+NAT) the session is abandoned (relay is optional, §8.4).
 
-ICE config: gather **host + server-reflexive** candidates; **trickle** them as
-they arrive. No TURN. If ICE fails (symmetric NAT both sides), the session is
-abandoned — peers stay reachable through any other peer only if app-level relay is
-enabled (§8.4, optional).
+**DataChannels are in-band negotiated** (`negotiated:false`): the offerer creates
+`"yaw"`; the answerer receives it via `ondatachannel`. ⚠️ *A received channel may
+already be `open` when `ondatachannel`/event fires — send your `hello` both on the
+`open` event **and** immediately if `readyState === "open"`, or you will deadlock.*
+
+**Identity confirm — exact bytes.** Let `lfp`/`rfp` be the **raw 32-byte** SHA-256
+DTLS fingerprints parsed from the local/remote SDP `a=fingerprint:sha-256 …` lines
+(strip the colons, hex-decode). Implementations MUST use `sha-256` fingerprints.
+
+- **Sender** signs `B = utf8("yaw/2 bind") || lfp || rfp` (its *own* local then
+  remote) and sends `sig = hex(ed25519_sign(B))` in `hello`.
+- **Verifier** reconstructs the sender's bytes — which are the verifier's **remote
+  then local** — i.e. checks `ed25519_verify(sig, utf8("yaw/2 bind") || rfp || lfp,
+  peer_id)` **and** that `peer_id` equals the expected (keyring) id. Either check
+  failing ⇒ close.
+
+After `hello` verification the session is **trusted and live**.
 
 ## 7. Why this is safe against a malicious anchor
 
@@ -197,12 +236,13 @@ enabled (§8.4, optional).
 
 The `yaw` channel is reliable + ordered. Each DataChannel message is one
 UTF-8 JSON object (DataChannels are message-framed — no length prefix needed).
-Unknown `type`s are ignored (forward compatibility). Every message carries `mid`
-(a random 16-byte hex message id) for dedup.
+Unknown `type`s and unknown fields are ignored (forward compatibility). In v1
+(full mesh, §8.4) there are no duplicates, so **`mid` is optional**; it becomes
+**required only when relay (`hops`) is used**, as a random 16-byte hex id for dedup.
 
 | type | fields | meaning |
 |------|--------|---------|
-| `hello` | `id, nick, caps[], sig` | identity confirm (§6); first message |
+| `hello` | `id, nick, sig` (+ optional `caps[]`) | identity confirm (§6); first message |
 | `presence` | `online:bool, nick` | online/away |
 | `chat` | `room, text, ts` | group message to a room (default `#main`) |
 | `pm` | `text, ts` | private message (this link only) |
@@ -218,7 +258,8 @@ Unknown `type`s are ignored (forward compatibility). Every message carries `mid`
 
 In v1 each peer connects **directly to every other** peer in the network (full
 mesh of sessions). `chat`/`presence` are sent to **all** open sessions; `pm` to one.
-Receivers dedup by `mid`.
+Each message is received once per session, so no dedup is needed (and `mid` may be
+omitted). Dedup matters only once relay is enabled below.
 
 > *Forward-compatible relay (optional, v1.1):* messages may carry `hops` (int, ≤4).
 > A node receiving a message with `hops>0` whose `mid` is new MAY re-send it to its
@@ -240,7 +281,8 @@ close "f:<xid>" after last chunk
 file-done {xid, sha256} ────────"yaw"───────────▶ verify sha256; success/failure
 ```
 
-- Chunk size: **64 KiB** default (DataChannel messages must stay < 256 KiB).
+- Chunk size: **64 KiB** default — but never exceed the session's negotiated
+  `a=max-message-size` (SDP); clamp down if the peer advertises a smaller limit.
 - Integrity: SHA-256 over the whole file, sent in the offer and re-asserted in
   `file-done`; the receiver verifies before accepting the file.
 - The transport (DTLS) already encrypts; no extra app-layer file encryption.
@@ -255,8 +297,9 @@ file-done {xid, sha256} ────────"yaw"─────────
 | STUN | `stun:fnlr.se:3478` (coturn, STUN-only, **deployed & verified**) |
 | Network scope | `net = hex(sha256("yaw2-net:" + name))` |
 | Identity | Ed25519; `id = hex(pubkey)` (64 chars) |
-| Signaling seal | libsodium `crypto_box`, `base64(nonce(24)||ct)` |
-| Bind string | `"yaw/2 bind" || local_dtls_fp || remote_dtls_fp` |
+| Signaling seal | libsodium `crypto_box`, `base64_ORIGINAL(nonce(24)||mac(16)||ct)` |
+| Bind (sign) | `utf8("yaw/2 bind") || local_fp || remote_fp` (raw 32-byte fps) |
+| Signaling close codes | 4001 = auth failed · 4002 = displaced by reconnect |
 | DataChannel (control) | label `yaw`, reliable, ordered |
 | DataChannel (file) | label `f:<xid>`, reliable, ordered, binary |
 | File chunk | 64 KiB |
@@ -277,8 +320,8 @@ file-done {xid, sha256} ────────"yaw"─────────
   revision may use ephemeral signaling keys.
 - **Trust bootstrapping is out of band.** Compromise of the keyring exchange (e.g.
   accepting a wrong `id`) defeats the system — verify short ids.
-- **Replay.** The join `nonce` is single-use; `mid` dedups app messages; DTLS
-  prevents transport replay.
+- **Replay.** The join `nonce` is single-use (server-issued per connection); DTLS
+  prevents transport replay; `mid` dedups app messages once relay is enabled.
 
 ## 12. Differences from YAW/1 (WASTE)
 
@@ -300,6 +343,36 @@ file-done {xid, sha256} ────────"yaw"─────────
 - **Post-quantum**: hybrid X25519+ML-KEM once WebRTC/libsodium support is routine.
 - **Room key distribution** (anchor optionally serves a network's member ids to
   ease group bootstrapping, still keyring-gated).
+
+## 14. Implementing & testing against the live server
+
+The reference infra is **live**: STUN `stun:fnlr.se:3478` and signaling
+`wss://fnlr.se/4802f621018e1968/signal` (both deployed & verified). To interop:
+
+1. Open the WebSocket, complete the `join` (§5.1), and you'll see `peers` /
+   `peer-join` — that alone confirms your Ed25519 join signature is correct.
+2. Pick a shared **network name** with your test partner; both hash it identically
+   (§5 conventions). Then run the connection flow (§6).
+3. Cross-check against the reference client: run `cli/spike_peer.py <network>`
+   (Python/aiortc) — it will dial your implementation and chat/transfer a file.
+
+**Three gotchas that break naïve implementations (learned the hard way):**
+
+- **base64 variant.** The seal is **standard padded** base64, not libsodium's
+  default url-safe/no-padding. Using `to_base64(x)` without
+  `base64_variants.ORIGINAL` produces an unopenable box.
+- **bind byte order on verify.** The sender signs `prefix||local||remote`; the
+  verifier must reconstruct `prefix||remote||local` (its remote = the sender's
+  local). Getting this backwards verifies nothing.
+- **answerer DataChannel open-race.** The received `"yaw"` channel is often already
+  `open` when you get it; send your `hello` on `readyState==="open"` too, not only
+  the `open` event, or both sides wait forever.
+
+> **Versioning.** 2.0 is **locked**. The one known weakness — signaling is not
+> forward-secret (§11) — is intentionally left as-is here so interop is stable. The
+> fix is specified separately as **[yaw/2.1](yaw2.1-protocol.md)** and motivated in
+> **[YIP-0001](proposals/yip-0001-forward-secret-signaling.md)**; 2.1 peers fall
+> back to 2.0 so both versions interoperate.
 
 ---
 

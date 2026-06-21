@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YAW/2 — web client (spike)</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #0e1014; color: #d8dce2;
+      display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+    aside { border-right: 1px solid #262b33; padding: 1rem; overflow-y: auto; }
+    main { display: flex; flex-direction: column; min-width: 0; }
+    h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
+    h3 { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #8b94a3; margin: 1.2rem 0 .4rem; }
+    input, button { font: inherit; color: #e6e8ec; background: #1c1f24; border: 1px solid #2b313a;
+      border-radius: 6px; padding: .4rem .5rem; }
+    input { width: 100%; margin-bottom: .4rem; }
+    button { cursor: pointer; background: #2c3038; }
+    button.primary { background: #4a9d6f; border-color: #4a9d6f; color: #06120b; font-weight: 600; width: 100%; }
+    .mono { font-family: ui-monospace, monospace; }
+    .muted { color: #8b94a3; }
+    .peer { padding: .3rem .4rem; border-radius: 6px; }
+    .badge { font-size: .68rem; padding: .05rem .4rem; border-radius: 999px; margin-left: .3rem; }
+    .ok { background: rgba(74,157,111,.2); color: #6fce96; } .warn { background: rgba(192,138,0,.2); color: #e0b341; }
+    .log { flex: 1; overflow-y: auto; padding: 1rem; }
+    .line { margin: .15rem 0; }
+    .line.sys { color: #8b94a3; font-size: .85rem; } .line.mine { color: #5a8fd6; } .line.file { color: #6fce96; }
+    .composer { display: flex; gap: .5rem; padding: .8rem; border-top: 1px solid #262b33; }
+    .composer input { margin: 0; }
+    a { color: #6fce96; }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>YAW/2 <span class="muted" style="font-size:.7rem">spike</span></h1>
+    <div id="me" class="mono muted" style="font-size:.75rem; word-break:break-all"></div>
+
+    <h3>Join</h3>
+    <input id="url" value="wss://fnlr.se/4802f621018e1968/signal" />
+    <input id="net" value="spike-room" placeholder="network name" />
+    <input id="nick" value="web" placeholder="nick" />
+    <button id="join" class="primary">Connect</button>
+
+    <h3>Peers <span id="pcount" class="muted"></span></h3>
+    <div id="peers"></div>
+
+    <h3>Send a file</h3>
+    <input id="file" type="file" />
+    <button id="sendfile">Send to all peers</button>
+  </aside>
+
+  <main>
+    <div id="log" class="log"></div>
+    <form id="composer" class="composer">
+      <input id="msg" placeholder="message…" autocomplete="off" style="flex:1" />
+      <button type="submit">Send</button>
+    </form>
+  </main>
+
+  <script src="vendor/sodium.bundle.js"></script>
+  <script src="yaw2.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const log = $('log');
+    function line(cls, html) {
+      const d = document.createElement('div'); d.className = 'line ' + cls; d.innerHTML = html;
+      log.appendChild(d); log.scrollTop = log.scrollHeight;
+    }
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    const short = (id) => esc((id || '').slice(0, 12)) + '…';
+
+    let node = null, ident = null;
+
+    function refreshPeers() {
+      const peers = node ? Object.values(node.peers) : [];
+      $('pcount').textContent = peers.length ? `(${peers.length})` : '';
+      $('peers').innerHTML = '';
+      for (const p of peers) {
+        const d = document.createElement('div'); d.className = 'peer mono';
+        d.innerHTML = short(p.peerId) + (p.verified ? '<span class="badge ok">verified</span>' : '<span class="badge warn">…</span>');
+        $('peers').appendChild(d);
+      }
+    }
+
+    function onEvent(kind, kw) {
+      if (kind === 'connected') { line('sys', `+ ${short(kw.peer)} connected ${kw.verified ? '(identity verified ✓)' : '(UNVERIFIED!)'}`); refreshPeers(); }
+      else if (kind === 'peer-leave') { line('sys', `- ${short(kw.peer)} left`); refreshPeers(); }
+      else if (kind === 'chat') line('', `<b>${short(kw.peer)}</b>: ${esc(kw.text)}`);
+      else if (kind === 'file-incoming') line('sys', `incoming file “${esc(kw.name)}” (${kw.size} B) from ${short(kw.peer)}…`);
+      else if (kind === 'file-recv') {
+        if (!kw.ok) { line('sys', `file “${esc(kw.name)}” FAILED hash check`); return; }
+        const urlObj = URL.createObjectURL(kw.blob);
+        line('file', `received “${esc(kw.name)}” (${kw.size} B) — <a href="${urlObj}" download="${esc(kw.name)}">save</a>`);
+      }
+    }
+
+    $('join').onclick = async () => {
+      $('join').disabled = true;
+      try {
+        await YAW.ready();
+        ident = YAW.Identity.load();
+        $('me').textContent = 'you: ' + ident.short;
+        const net = YAW.netHash($('net').value.trim());
+        node = new YAW.Node($('url').value.trim(), ident, net, onEvent);
+        line('sys', `joining network “${esc($('net').value.trim())}”…`);
+        await node.start();
+        line('sys', 'connected to signaling — waiting for peers (open this page elsewhere or run the CLI peer).');
+        setInterval(refreshPeers, 1500);
+      } catch (e) { line('sys', 'error: ' + esc(e.message)); $('join').disabled = false; }
+    };
+
+    $('composer').onsubmit = (e) => {
+      e.preventDefault();
+      const t = $('msg').value.trim(); if (!t || !node) return;
+      $('msg').value = '';
+      for (const p of Object.values(node.peers)) p.sendChat(t);
+      line('mine', `<b>you</b>: ${esc(t)}`);
+    };
+
+    $('sendfile').onclick = async () => {
+      const f = $('file').files[0]; if (!f || !node) return;
+      for (const p of Object.values(node.peers)) await p.sendFile(f);
+      line('file', `sending “${esc(f.name)}” (${f.size} B) to ${Object.keys(node.peers).length} peer(s)…`);
+    };
+  </script>
+</body>
+</html>
