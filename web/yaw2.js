@@ -4,7 +4,8 @@
 
 const YAW = (() => {
   let S = null; // libsodium, after ready
-  const STUN = 'stun:fnlr.se:3478';
+  const STUN = (typeof window !== 'undefined' && window.YAW_CONFIG && window.YAW_CONFIG.stunURL)
+    || 'stun:your-anchor.example:3478';   // real value comes from config.js (gitignored)
   const BIND_PREFIX = 'yaw/2 bind';
   const CHUNK = 64 * 1024;
   const enc = (s) => new TextEncoder().encode(s);

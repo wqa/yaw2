@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from yaw2 import Identity, Node, net_hash
 
-SIGNAL_URL = "wss://fnlr.se/4802f621018e1968/signal"
+from yaw2.config import signal_url
+SIGNAL_URL = signal_url()
 
 
 async def main():

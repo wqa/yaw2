@@ -57,11 +57,11 @@ attic/        archived YAW/1 (WASTE) — frozen, gitignored, NOT part of v2
 
 ## Status
 
-**Live infrastructure** (on `fnlr.se`):
+**Live infrastructure** (on `<anchor-host>`):
 
 | Service | What |
 |---------|------|
-| STUN | `stun:fnlr.se:3478` (coturn, STUN-only) |
+| STUN | `stun:<anchor-host>:3478` (coturn, STUN-only) |
 | Signaling | WebSocket relay (secret path), sealed blobs only |
 | Web client | hosted behind a secret path + basic auth — open in a browser, no install |
 
@@ -82,20 +82,28 @@ cross-NAT traversal needs peers on *different* networks to validate. Tauri shell
 - **[KEYHANDLING.md](KEYHANDLING.md)** — how your identity is stored, backed up, and
   moved between the CLI and the web client.
 
+**Operators:** **[ROTATING_KEYS.md](ROTATING_KEYS.md)** — the secret inventory and how
+to rotate the signaling path, web-app path, basic-auth, network name, and identity
+keys. Deployment endpoints are not in the repo: the CLI reads `~/.yaw/config`
+(see `cli/yaw2/config.py`) and the web client reads a gitignored `web/config.js`
+(template: `web/config.example.js`).
+
 ## Quick start
 
 A YAW/2 network is just a shared **name** (hashed for the server). Two peers on the
 same name find each other.
 
-**Python CLI peer:**
+**Python CLI peer:** first point it at your anchor — create `~/.yaw/config` with
+`signal_url = …` and `stun_url = …` (see `cli/yaw2/config.py`), or set `YAW_SIGNAL` /
+`YAW_STUN`. Then:
 
 ```sh
 cd cli && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python spike_peer.py my-network        # chat to all peers; files land in /tmp
+.venv/bin/python spike_peer.py my-network        # omit the name to use default_net
 ```
 
-**Browser:** open the hosted web client (URL + login are in `deploy/` — gitignored),
-or serve it locally for development:
+**Browser:** open the hosted web client (the secret URL + basic-auth login are held by
+the operator — see `web/config.js`, gitignored), or serve it locally for development:
 
 ```sh
 cd web && python3 -m http.server 8090            # then open http://localhost:8090

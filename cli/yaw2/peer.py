@@ -20,8 +20,9 @@ from aiortc import (RTCPeerConnection, RTCConfiguration, RTCIceServer,
 from .identity import Identity
 from .signaling import Signaling
 from .fileshare import FileShare
+from .config import stun_url
 
-STUN = "stun:fnlr.se:3478"
+STUN = stun_url()
 BIND_PREFIX = b"yaw/2 bind"
 CHUNK = 64 * 1024
 

@@ -22,8 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from yaw2 import Identity, Keyring, Node, net_hash, make_card, parse_card
 from yaw2.keybackup import encrypt_seed, decrypt_seed
 from yaw2.keyring import clean_nick
+from yaw2.config import signal_url, default_net
 
-SIGNAL_URL = "wss://fnlr.se/4802f621018e1968/signal"
+SIGNAL_URL = signal_url()
 HOME = os.path.expanduser("~/.yaw")
 DOWNLOADS = os.path.join(HOME, "downloads")
 ID_PATH = os.path.join(HOME, "identity")
@@ -58,7 +59,7 @@ def load_identity() -> Identity:
 
 
 def parse_args(argv):
-    netname, share, nick = "spike-room", os.path.join(HOME, "share"), None
+    netname, share, nick = None, os.path.join(HOME, "share"), None
     it = iter(argv)
     for a in it:
         if a == "--share":
@@ -72,6 +73,7 @@ def parse_args(argv):
 
 async def main():
     netname, share_dir, nick_arg = parse_args(sys.argv[1:])
+    netname = netname or default_net() or "spike-room"
     os.makedirs(share_dir, exist_ok=True)
     os.makedirs(DOWNLOADS, exist_ok=True)
     ident = load_identity()

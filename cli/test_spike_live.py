@@ -3,8 +3,8 @@
 authenticated WebRTC DataChannel, chat both ways, and transfer a file —
 verifying §5–§9 end to end against production infra.
 
-Both peers run here (same machine), but signaling (wss://fnlr.se/…) and STUN
-(stun:fnlr.se:3478) are the real deployed services. True cross-NAT validation is
+Both peers run here (same machine), but signaling (wss://<anchor-host>/…) and STUN
+(stun:<anchor-host>:3478) are the real deployed services. True cross-NAT validation is
 the later multi-device test.
 """
 
@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from yaw2 import Identity, Node, net_hash
 
-SIGNAL_URL = "wss://fnlr.se/4802f621018e1968/signal"
+from yaw2.config import signal_url
+SIGNAL_URL = signal_url()
 
 
 async def main():

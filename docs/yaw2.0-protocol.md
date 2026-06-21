@@ -92,7 +92,7 @@ The anchor has **two** jobs and sees **no** user data:
 
 1. **Signaling (WebSocket, `wss://`)** — authenticates members of a network and
    relays opaque sealed blobs between them by `id`.
-2. **STUN (UDP/3478)** — standard STUN (RFC 5389), e.g. `stun:fnlr.se:3478`,
+2. **STUN (UDP/3478)** — standard STUN (RFC 5389), e.g. `stun:<anchor-host>:3478`,
    used as an ICE server so peers learn their public (server-reflexive) address.
    *STUN only — no TURN relay.*
 
@@ -293,8 +293,8 @@ file-done {xid, sha256} ────────"yaw"─────────
 | Parameter | Value |
 |-----------|-------|
 | Protocol version | `yaw/2.0` |
-| Signaling | `wss://fnlr.se/4802f621018e1968/signal` (WebSocket) **[deployed & verified]** |
-| STUN | `stun:fnlr.se:3478` (coturn, STUN-only, **deployed & verified**) |
+| Signaling | `wss://<your-anchor>/<secret-path>/signal` (WebSocket) **[deployed & verified]** |
+| STUN | `stun:<anchor-host>:3478` (coturn, STUN-only, **deployed & verified**) |
 | Network scope | `net = hex(sha256("yaw2-net:" + name))` |
 | Identity | Ed25519; `id = hex(pubkey)` (64 chars) |
 | Signaling seal | libsodium `crypto_box`, `base64_ORIGINAL(nonce(24)||mac(16)||ct)` |
@@ -346,8 +346,8 @@ file-done {xid, sha256} ────────"yaw"─────────
 
 ## 14. Implementing & testing against the live server
 
-The reference infra is **live**: STUN `stun:fnlr.se:3478` and signaling
-`wss://fnlr.se/4802f621018e1968/signal` (both deployed & verified). To interop:
+The reference infra is **live**: STUN `stun:<anchor-host>:3478` and signaling
+`wss://<your-anchor>/<secret-path>/signal` (both deployed & verified). To interop:
 
 1. Open the WebSocket, complete the `join` (§5.1), and you'll see `peers` /
    `peer-join` — that alone confirms your Ed25519 join signature is correct.

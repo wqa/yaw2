@@ -4,6 +4,24 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-21 — Scrubbing the disguise clean
+On the night of 20–21 June 1791 Louis XVI fled Paris dressed as a valet and was
+recognized at Varennes — a disguise leaks at exactly the seam you forget. So we went
+looking for our seams:
+
+- **Secret endpoints out of the repo.** The signaling path, the web-app and download
+  paths, the anchor/STUN host, and the default network name no longer appear in any
+  tracked file. The CLI reads them from `~/.yaw/config` (or `YAW_SIGNAL`/`YAW_STUN`/
+  `YAW_NET`); the web client from a gitignored `web/config.js` (template
+  `config.example.js`). The real nginx vhost and deploy script are now gitignored with
+  a sanitized `*.example` committed in their place.
+- **ROTATING_KEYS.md** — an operator playbook: the full secret inventory and how to
+  rotate the secret paths, basic-auth, network name, and identity keys, plus the
+  honest note that earlier commits still hold the old values — so rotation, not just
+  scrubbing, is the real remedy.
+- Verified the clients still connect end-to-end with endpoints sourced from config,
+  and a full tracked-file scan shows no host or secret path remaining.
+
 ### 2026-06-21 — Putting a name to the number
 On the longest day of the year — when the sun lingers as if reluctant to forget a
 single face — we taught YAW to remember names. On this day in 1834 Cyrus McCormick
@@ -137,10 +155,10 @@ right one boots the node. Eight headless JS suites green, including a new
 `lock_flow` that drives the whole lock→unlock path. Rebuilt and re-published the
 macOS + Windows bundles behind the secret link so the live download carries it all.
 
-### 2026-06-20 — Distribution: live anchor at fnlr.se + downloadable client
+### 2026-06-20 — Distribution: live anchor at <anchor-host> + downloadable client
 On this day in 1840 Samuel Morse was granted the telegraph patent — a network is
 only as useful as the people who can quietly find their way onto it. The anchor
-now runs in production at **https://fnlr.se** (gunicorn + systemd, behind nginx
+now runs in production at **https://<anchor-host>** (gunicorn + systemd, behind nginx
 with the existing Let's Encrypt cert), wearing a plain cover page that says
 nothing of meshes; the directory API hides under an unguessable path prefix and
 the client downloads from a second secret path. Made the anchor **Python 3.8**-

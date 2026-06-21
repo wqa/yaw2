@@ -31,8 +31,8 @@ locked and matches the deployed server. 2.1 is additive and opportunistic.
 
 | Service | Endpoint | Status |
 |---------|----------|--------|
-| STUN | `stun:fnlr.se:3478` (coturn, STUN-only) | live |
-| Signaling | `wss://fnlr.se/4802f621018e1968/signal` | live |
+| STUN | `stun:<anchor-host>:3478` (coturn, STUN-only) | live |
+| Signaling | `wss://<your-anchor>/<secret-path>/signal` | live |
 
 Reference clients: `signaling/` (server), `cli/` (Python/aiortc), `web/`
 (browser). See 2.0 §14 for an interop test recipe.
