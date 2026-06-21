@@ -40,6 +40,7 @@
     <input id="url" placeholder="signaling URL" />
     <input id="net" placeholder="network name" />
     <button id="join" class="primary">Connect</button>
+    <button id="diag">Test my connectivity</button>
 
     <h3>You</h3>
     <input id="nick" placeholder="your nickname" />
@@ -239,6 +240,16 @@
       if (node) node.setNick(v); else localStorage.setItem('yaw2_nick', YAW.cleanNick(v));
       refreshMe();
       line('sys', 'nickname set: ' + (myNick() || '(none)'));
+    };
+
+    $('diag').onclick = async () => {
+      line('sys', 'testing connectivity…');
+      try {
+        const c = await YAW.diagnose();
+        const srflx = [...new Set(c.srflx)];
+        if (srflx.length) line('sys', `✓ STUN works — your public address is ${esc(srflx[0])}. You should be reachable on most networks; if a specific peer still can't connect, one side is likely behind symmetric NAT/CGNAT — try another network.`);
+        else line('sys', '✗ no reflexive candidate — STUN is blocked or this network won\'t allow direct peer connections. Try another network (there is no relay fallback by design).');
+      } catch (e) { line('sys', 'connectivity test failed: ' + esc(e.message)); }
     };
 
     $('expcontacts').onclick = () => {

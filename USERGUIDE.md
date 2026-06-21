@@ -64,6 +64,9 @@ manager or encrypted drive).
 
 - Check that you've **both accepted each other's card**, and you're **both online**
   (Connected, same network name).
+- Click **Test my connectivity**. If it says STUN works and shows your public address,
+  your network is fine. If it finds no reflexive address, this network is blocking
+  direct connections.
 - Some networks — especially **mobile/carrier** connections — block direct peer
   connections. Try a normal Wi-Fi network for one side. (By design, the server never
   relays your traffic, so it can't paper over this.)

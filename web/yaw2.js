@@ -159,6 +159,21 @@ const YAW = (() => {
     close() { this._closed = true; if (this.ws) this.ws.close(); }
   }
 
+  async function diagnose() {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: STUN }] });
+    pc.createDataChannel('diag');
+    await pc.setLocalDescription(await pc.createOffer());
+    await gatherComplete(pc);
+    const cands = { host: [], srflx: [], relay: [] };
+    const re = /a=candidate:\S+ \d+ \S+ \d+ (\S+) (\d+) typ (\w+)/;
+    for (const line of (pc.localDescription.sdp || '').split('\n')) {
+      const m = re.exec(line);
+      if (m && cands[m[3]]) cands[m[3]].push(`${m[1]}:${m[2]}`);
+    }
+    pc.close();
+    return cands;
+  }
+
   function gatherComplete(pc) {
     if (pc.iceGatheringState === 'complete') return Promise.resolve();
     return new Promise((res) => {
@@ -362,5 +377,5 @@ const YAW = (() => {
     forget(id) { return this.keyring.remove(id); }
   }
 
-  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick };
+  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick, diagnose };
 })();
