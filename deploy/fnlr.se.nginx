@@ -9,6 +9,17 @@ server {
         add_header X-Robots-Tag "noindex, nofollow" always;
     }
 
+    # YAW/2 web client — static files behind a secret path + basic auth.
+    # Server only serves HTML/JS; secrets live in the browser's localStorage,
+    # mesh data is peer-to-peer (server stays a pure anchor).
+    location /1bf4b6c531153bfd/ {
+        alias /home/fnlr/yaw-web/;
+        index index.html;
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd-yaw;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+    }
+
     # YAW/2 signaling — WebSocket proxy to the local signaling server.
     # Carries only sealed offer/answer/ICE blobs; never file data.
     location /4802f621018e1968/signal {

@@ -1,79 +1,116 @@
-# YAW — Yet Another WASTE
+# YAW/2
 
-A clean-room Python implementation of the [WASTE](https://en.wikipedia.org/wiki/WASTE)
-darknet mesh: a small (10–50 node) trusted group that exchanges **encrypted chat,
-private messages, presence, and searches** with no central server. Plus an
-always-on **anchor** that keeps the mesh reachable while members change IP.
+A small, trusted, **peer-to-peer encrypted mesh** — chat, presence, and file
+transfer — that pierces NAT the modern way (WebRTC + ICE/STUN) and rides a modern
+encrypted transport (DTLS DataChannels). A lightweight server (the **anchor**)
+helps peers *find and introduce* each other and **never carries their data**.
 
-## What's here
+YAW/2 is a clean break from the original WASTE protocol — the faithful Blowfish/RSA
+implementation has been retired (see [`attic/`](#repository-layout)).
+
+> **Specs are the source of truth:** [`docs/`](docs/README.md) — the protocol is
+> **[`yaw/2.0`](docs/yaw2.0-protocol.md) (LOCKED)** with a drafted
+> **[`yaw/2.1`](docs/yaw2.1-protocol.md)** for forward-secret signaling.
+
+## Design policy
+
+These are the rules the codebase upholds. Changing any of them is a protocol-level
+decision (open a [YIP](docs/proposals/)).
+
+1. **The anchor is *only* a rendezvous.** It does **signaling (WebSocket) + STUN**,
+   and relays only **end-to-end-sealed** blobs. It MUST NOT carry mesh data — **no
+   relay, no TURN**. It learns presence + the contact graph within a *hashed*
+   network, and nothing else: not message content, not files, not peer IPs, not the
+   network name.
+2. **True peer-to-peer.** Sessions are direct WebRTC DataChannels (DTLS, per-session
+   forward secrecy). The accepted trade-off: peers learn each other's IP on a direct
+   link, and a minority behind symmetric NAT won't connect (no relay to fall back
+   to).
+3. **Identity = Ed25519; trust = keyring.** A node is its public key. You talk to a
+   peer only if its `id` is in your keyring, exchanged **out of band**
+   (friend-to-friend). The anchor cannot vouch for or impersonate anyone.
+4. **Secrets stay on the client.** Private keys live in client storage (browser
+   `localStorage`, CLI `~/.yaw`). Nothing secret is uploaded; the server is stateless
+   beyond presence.
+5. **The wire is versioned and disciplined.** **`yaw/2.0` is LOCKED** as the interop
+   baseline — independent implementations build against it and the live server.
+   Changes go through **YIPs**; breaking changes require agreement and a version bump
+   (e.g. `yaw/2.1`), and ship **backward-compatibly** where possible.
+6. **One protocol, many clients, one crypto.** Browser, Python CLI, (planned) Tauri —
+   all speak the same wire. **libsodium everywhere** (PyNaCl / libsodium.js) so
+   signing and sealing are byte-identical across implementations.
+
+## Repository layout
 
 ```
-wasteproto/   the protocol library (one self-testable class per file)
-  rsa_identity   RSA keypair + public-key fingerprints (the web of trust)
-  keyring        the set of peer keys you've accepted
-  blowfish_pcbc  the WASTE session cipher (Blowfish in PCBC, hand-rolled)
-  handshake      the link negotiation: challenge → identify → session key → confirm
-  framing        per-message framing with MD5 integrity
-  messages       chat / PM / presence / host-info / search payloads
-  router         broadcast flood with TTL + GUID de-duplication
-  filetransfer   1:1 file browse + chunked, hash-verified transfer
-  peer           one link: socket + session + receive loop
-  node           a mesh member: listen, dial, flood, stay alive
-client/        the interactive line client (client.cli) + anchor helper
-anchor/        the Flask rendezvous directory (app + SQLite store)
-tests/         module self-tests + an end-to-end mobility test
-electron-client/  a desktop (Electron) client — same wire protocol, see its README
+docs/         protocol specs + proposals (START HERE — docs/README.md)
+                yaw2.0-protocol.md   🔒 LOCKED interop baseline
+                yaw2.1-protocol.md   📝 draft: forward-secret signaling
+                proposals/yip-0001-*  the motivated change proposal
+signaling/    the anchor's WebSocket signaling server (Python, asyncio + PyNaCl)
+cli/          YAW/2 Python client — yaw2/ (identity, signaling, aiortc peer)
+                + spike_peer.py (interactive) + test_spike_live.py
+web/          browser client — index.html, yaw2.js, vendored libsodium
+deploy/       server config (nginx, systemd, coturn); secrets are gitignored
+attic/        archived YAW/1 (WASTE) — frozen, gitignored, NOT part of v2
 ```
 
-A JavaScript/Electron desktop client lives in [electron-client/](electron-client/).
-It re-implements the mesh core in Node and is **wire-compatible** — a JS node and a
-Python node chat on the same mesh, sharing the same anchor.
+## Status
 
-## Trust model
+**Live infrastructure** (on `fnlr.se`):
 
-Every node has an RSA identity; you're known by the **fingerprint** (SHA-1 of your
-public key). A link forms only if each side has *accepted the other's public key*.
-Swap key files out-of-band, then `/accept` them. An optional case-sensitive
-**network name** further scopes who can connect.
+| Service | What |
+|---------|------|
+| STUN | `stun:fnlr.se:3478` (coturn, STUN-only) |
+| Signaling | WebSocket relay (secret path), sealed blobs only |
+| Web client | hosted behind a secret path + basic auth — open in a browser, no install |
+
+**Proven:** an authenticated, identity-bound DataChannel between the Python CLI and
+the browser/another CLI — over the *production* signaling + STUN — exchanging chat
+both ways and a hash-verified file (see `cli/test_spike_live.py`). JS ↔ Python
+crypto is verified byte-identical.
+
+**Spike caveats (next to harden):** the current clients **trust any id on the
+network (TOFU)** — the keyring gate (policy #3) is the first thing to add. True
+cross-NAT traversal needs peers on *different* networks to validate. Tauri shell and
+`yaw/2.1` are not built yet.
 
 ## Quick start
 
-```sh
-make run-anchor                 # rendezvous directory on http://127.0.0.1:5055
-make run-client                 # interactive client (NODE_PORT defaults to 1337)
-```
+A YAW/2 network is just a shared **name** (hashed for the server). Two peers on the
+same name find each other.
 
-In the client:
-
-```
-/id                             # your fingerprint + exported key file
-/accept friend.pub              # trust a peer's exported public key
-/connect 10.0.0.42 1337         # dial a peer directly …
-/anchor http://host:5055        # … or register and auto-find peers as they move
-hello everyone                  # bare text → current room (#general)
-/pm 1a2b3c hi there             # private message by fingerprint prefix
-/shared                         # list files you share (drop them in yawdata/share)
-/browse 1a2b3c                  # see a peer's shared files
-/get 1a2b3c report.pdf          # download one (saved to yawdata/downloads)
-```
-
-Run any module's self-test directly against the venv:
+**Python CLI peer:**
 
 ```sh
-.venv/bin/python -m wasteproto.handshake
-make test                       # the whole suite
+cd cli && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python spike_peer.py my-network        # chat to all peers; files land in /tmp
 ```
 
-## Crypto note
+**Browser:** open the hosted web client (URL + login are in `deploy/` — gitignored),
+or serve it locally for development:
 
-The faithful path uses **RSA + Blowfish-PCBC** for wire-fidelity with the original
-WASTE client. PCBC has known weaknesses, so two YAW nodes additionally advertise a
-capability flag and can negotiate a modern session on top — while a stock WASTE
-peer falls back to the faithful mode. Byte-exact interop with the original client
-is validated separately against the reference source (see the project plan, M6).
+```sh
+cd web && python3 -m http.server 8090            # then open http://localhost:8090
+```
 
-## Deploy
+Pick the same network name on both, and they connect. The CLI peer interoperates
+with the browser for a mixed browser↔CLI test.
 
-We develop on macOS and deploy on Linux. `make deploy REMOTE=user@host` rsyncs the
-code (never with `--delete`), rebuilds the **remote** `.venv`, and restarts the
-service. Private keys, the venv, and the local database are excluded.
+## Implementing another client / testing interop
+
+Build against **[`docs/yaw2.0-protocol.md`](docs/yaw2.0-protocol.md)** (§5–§9) and
+point at the live STUN + signaling. Section §14 lists the endpoints, an interop test
+recipe, and the three gotchas that trip up naïve implementations (base64 variant,
+identity-bind byte order, the DataChannel open-race).
+
+## Security posture (summary)
+
+- **Content** (chat/files) is end-to-end encrypted with per-session forward secrecy
+  (DTLS). The server never sees it.
+- **Signaling** is sealed end-to-end; the server can't read SDP, candidate IPs, or
+  content — only presence/timing within a hashed network. In `2.0` the sealing keys
+  are static (not forward-secret); `2.1` (drafted) fixes this. See
+  [`docs/yaw2.0-protocol.md` §11](docs/yaw2.0-protocol.md) and
+  [YIP-0001](docs/proposals/yip-0001-forward-secret-signaling.md).
+- **Trust** is the keyring; verify a contact's short id out of band before accepting.
