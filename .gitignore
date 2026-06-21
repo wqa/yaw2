@@ -1,0 +1,25 @@
+# Pre-YAW/2 archive — kept locally, never committed
+attic/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Secrets & local state (server config holds secret paths/keys)
+deploy/anchor.env
+*.env
+*.pem
+yawdata/
+.yaw/
+
+# Node / Rust / build artifacts
+node_modules/
+build/
+dist/
+.build/
+target/
+
+# OS
+.DS_Store

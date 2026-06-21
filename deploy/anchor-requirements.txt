@@ -1,0 +1,4 @@
+Flask>=2.0,<4
+Jinja2>=3.0
+pycryptodome>=3.20.0
+gunicorn>=21,<24

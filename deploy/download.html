@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>YAW — download</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+      justify-content: center; background: #0e1014; color: #d8dce2;
+      font: 15px/1.6 ui-sans-serif, system-ui, sans-serif; }
+    .card { max-width: 30rem; padding: 2rem; text-align: center; }
+    h1 { font-size: 2rem; margin: 0 0 .2rem; letter-spacing: .04em; }
+    h1 .dot { color: #4a9d6f; }
+    p.sub { color: #8b94a3; margin: 0 0 1.8rem; }
+    .dl { display: block; text-decoration: none; color: #e6e8ec;
+      border: 1px solid #2b313a; border-radius: 10px; padding: .9rem 1rem;
+      margin: .6rem 0; background: #171a20; transition: border-color .15s; }
+    .dl:hover { border-color: #4a9d6f; }
+    .dl b { display: block; font-size: 1.02rem; }
+    .dl span { color: #8b94a3; font-size: .82rem; }
+    .note { margin-top: 1.6rem; font-size: .8rem; color: #79818f; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>YAW<span class="dot">.</span></h1>
+    <p class="sub">Download the client for your platform.</p>
+
+    <a class="dl" href="./yaw-macos-arm64-native.zip">
+      <b>macOS — Apple Silicon (native)</b>
+      <span>.zip · 0.2 MB · signed &amp; notarized · just double-click · beta</span>
+    </a>
+    <a class="dl" href="./yaw-macos-arm64.zip">
+      <b>macOS — Apple Silicon (Electron)</b>
+      <span>.zip · right-click → Open on first launch</span>
+    </a>
+    <a class="dl" href="./yaw-windows-x64.zip">
+      <b>Windows — 64-bit</b>
+      <span>.zip · run YAW.exe · "More info → Run anyway" if prompted</span>
+    </a>
+    <a class="dl" href="./yaw-cli-src.tar.gz">
+      <b>Command-line client</b>
+      <span>.tar.gz · macOS / Linux / Windows · needs Python 3.8+ · run ./yaw</span>
+    </a>
+
+    <p class="note">GUI first run: <b>Show my key</b>, swap keys with a contact,
+      <b>Accept</b> theirs, then <b>Anchor</b>. A start note is inside each download.</p>
+  </main>
+</body>
+</html>

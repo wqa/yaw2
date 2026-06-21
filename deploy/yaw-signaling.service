@@ -1,0 +1,20 @@
+[Unit]
+Description=YAW/2 signaling server (WebSocket)
+After=network.target
+
+[Service]
+Type=simple
+User=fnlr
+Group=fnlr
+WorkingDirectory=/home/fnlr/yaw-signaling
+Environment=SIG_HOST=127.0.0.1
+Environment=SIG_PORT=8077
+ExecStart=/home/fnlr/yaw-signaling/.venv/bin/python /home/fnlr/yaw-signaling/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

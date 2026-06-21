@@ -1,0 +1,20 @@
+[Unit]
+Description=YAW anchor (rendezvous directory)
+After=network.target
+
+[Service]
+Type=simple
+User=fnlr
+Group=fnlr
+WorkingDirectory=/home/fnlr/yaw-anchor
+EnvironmentFile=/home/fnlr/yaw-anchor/anchor.env
+ExecStart=/home/fnlr/yaw-anchor/.venv/bin/gunicorn --chdir /home/fnlr/yaw-anchor \
+          --workers 1 --threads 4 --bind 127.0.0.1:8055 --timeout 60 anchor.app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
