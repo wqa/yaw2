@@ -36,3 +36,26 @@ locked and matches the deployed server. 2.1 is additive and opportunistic.
 
 Reference clients: `signaling/` (server), `cli/` (Python/aiortc), `web/`
 (browser). See 2.0 §14 for an interop test recipe.
+
+## Connectivity & NAT (by design: STUN-only, no TURN)
+
+YAW is **true peer-to-peer**: media flows directly between peers over WebRTC, and
+the anchor only signals + provides STUN. There is **deliberately no TURN relay**, so
+the anchor never carries or sees user traffic.
+
+The tradeoff: peers behind **symmetric NAT or CGNAT** (common on some mobile
+carriers and corporate networks) may be **unable to connect to each other** — STUN
+cannot punch through those. Most home/office networks work; a hotspot or carrier-grade
+NAT may not. This is an accepted limitation, not a bug. If a pair won't link, try a
+different network for one side. (Adding an encrypted-DTLS TURN relay remains a future
+option, but it would mean the server relays ciphertext — a step away from "the anchor
+only signals" — so it stays off until measured demand justifies it.)
+
+## Identity & backup
+
+An identity is an Ed25519 keypair; losing it means every friend must re-accept your
+new id. Clients keep the key locally (browser `localStorage`, CLI `~/.yaw/identity`),
+which is **not a backup** — clearing browser data or losing the device loses it.
+Export a **passphrase-encrypted key backup** (`*.yawkey`) and store it safely; the
+same file restores your identity in the web client *and* the CLI (one format, verified
+byte-identical across libsodium.js and PyNaCl).

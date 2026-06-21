@@ -29,6 +29,25 @@ const YAW = (() => {
     return out;
   }
 
+  // --- passphrase-encrypted identity backup (shared format with the CLI) ------
+  const BK_FORMAT = 'yaw-key-backup-1', BK_OPS = 2, BK_MEM = 67108864;
+  function exportSeed(seed, passphrase) {
+    const b64 = (b) => S.to_base64(b, S.base64_variants.ORIGINAL);
+    const salt = S.randombytes_buf(S.crypto_pwhash_SALTBYTES);
+    const key = S.crypto_pwhash(S.crypto_secretbox_KEYBYTES, passphrase, salt, BK_OPS, BK_MEM, S.crypto_pwhash_ALG_ARGON2ID13);
+    const nonce = S.randombytes_buf(S.crypto_secretbox_NONCEBYTES);
+    const ct = S.crypto_secretbox_easy(seed, nonce, key);
+    const pub = S.to_hex(S.crypto_sign_seed_keypair(seed).publicKey);
+    return { yaw: BK_FORMAT, id: pub, alg: 'argon2id-secretbox', ops: BK_OPS, mem: BK_MEM,
+             salt: b64(salt), nonce: b64(nonce), ct: b64(ct) };
+  }
+  function importSeed(b, passphrase) {
+    if (!b || b.yaw !== BK_FORMAT) throw new Error('not a yaw key backup');
+    const ub = (s) => S.from_base64(s, S.base64_variants.ORIGINAL);
+    const key = S.crypto_pwhash(S.crypto_secretbox_KEYBYTES, passphrase, ub(b.salt), b.ops | 0, b.mem | 0, S.crypto_pwhash_ALG_ARGON2ID13);
+    return S.crypto_secretbox_open_easy(ub(b.ct), ub(b.nonce), key);   // throws on wrong passphrase
+  }
+
   class Identity {
     constructor(kp) {
       this.pub = kp.publicKey; this.priv = kp.privateKey;
@@ -44,6 +63,12 @@ const YAW = (() => {
         localStorage.setItem('yaw2_seed', S.to_hex(kp.privateKey.slice(0, 32)));
       }
       return new Identity(kp);
+    }
+    exportBackup(passphrase) { return exportSeed(this.priv.slice(0, 32), passphrase); }
+    static importBackup(backup, passphrase) {
+      const seed = importSeed(backup, passphrase);   // throws on wrong passphrase
+      localStorage.setItem('yaw2_seed', S.to_hex(seed));
+      return new Identity(S.crypto_sign_seed_keypair(seed));
     }
     get short() { return this.id.slice(0, 16).replace(/(.{4})/g, '$1 ').trim(); }
     sign(data) { return S.crypto_sign_detached(data, this.priv); }

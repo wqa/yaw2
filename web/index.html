@@ -47,6 +47,12 @@
     <input id="acceptid" placeholder="friend's id (64 hex)" />
     <button id="accept">Accept key</button>
     <div id="keys" class="muted" style="font-size:.72rem; margin-top:.4rem"></div>
+    <div style="margin-top:.5rem">
+      <button id="backupkey">Back up key</button>
+      <button id="restorekey">Restore key</button>
+      <input id="keyfile" type="file" accept=".yawkey,.json,application/json" style="display:none" />
+    </div>
+    <div class="muted" style="font-size:.68rem; margin-top:.3rem">Your key lives in this browser. Back it up — clearing site data erases it.</div>
 
     <h3>Peers <span id="pcount" class="muted"></span></h3>
     <div id="peers"></div>
@@ -177,6 +183,32 @@
       catch (e) { line('sys', 'error: ' + esc(e.message)); }
     };
 
+    $('backupkey').onclick = () => {
+      if (!ident) return;
+      const pass = prompt('Choose a passphrase to encrypt your key backup:');
+      if (!pass) return;
+      const backup = ident.exportBackup(pass);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+      a.download = 'yaw-identity-' + ident.id.slice(0, 8) + '.yawkey';
+      a.click();
+      line('sys', 'key backup downloaded — store it safely; it restores this identity anywhere.');
+    };
+    $('restorekey').onclick = () => $('keyfile').click();
+    $('keyfile').onchange = async () => {
+      const f = $('keyfile').files[0]; if (!f) return;
+      const pass = prompt('Passphrase for this key backup:');
+      if (!pass) { $('keyfile').value = ''; return; }
+      try {
+        await YAW.ready();
+        ident = YAW.Identity.importBackup(JSON.parse(await f.text()), pass);
+        $('me').textContent = 'you: ' + ident.short;
+        $('myid').textContent = ident.id;
+        line('sys', `identity restored: ${ident.short} — ${node ? 'reconnect' : 'connect'} to use it.`);
+      } catch (e) { line('sys', 'restore failed (wrong passphrase or bad file): ' + esc(e.message)); }
+      $('keyfile').value = '';
+    };
+
     $('addshare').onclick = () => {
       if (!node || !$('file').files.length) return;
       for (const f of $('file').files) node.shared.set(f.name, f);
@@ -193,6 +225,17 @@
         line('file', `sending “${esc(f.name)}” (${f.size} B) to ${Object.keys(node.peers).length} peer(s)…`);
       }
     };
+
+    // Load identity on page open so the id + backup work before connecting.
+    (async () => {
+      try {
+        await YAW.ready();
+        ident = YAW.Identity.load();
+        $('me').textContent = 'you: ' + ident.short;
+        $('myid').textContent = ident.id;
+        $('myid').onclick = () => { navigator.clipboard?.writeText(ident.id); line('sys', 'your id copied to clipboard'); };
+      } catch (e) { /* sodium not ready yet; join() will load it */ }
+    })();
   </script>
 </body>
 </html>

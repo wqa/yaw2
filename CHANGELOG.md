@@ -4,6 +4,24 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-21 — One key file, everywhere (and a candid word on NAT)
+On this day in 1948 the first stored program ran; on this day in 1990 a magnitude-7.4
+quake in Iran reminded everyone that the ground you build on matters. So we made
+identity portable and wrote down where our ground is soft:
+
+- **Passphrase-encrypted key backup.** Export your identity to a `*.yawkey` file
+  (Argon2id + secretbox) and store it safely; the *same file* restores you in the
+  web client and the CLI. Verified **byte-identical across libsodium.js and PyNaCl**
+  in both directions, so a key minted in the browser unlocks in Python and vice
+  versa. New: `cli/yaw2/keybackup.py`, CLI `/export` `/import`, web Back-up/Restore
+  buttons. localStorage stays the day-to-day store — the file is the durable backup
+  it never was.
+- **Documented the STUN-only / no-TURN tradeoff.** True P2P means the anchor never
+  relays traffic — and means symmetric-NAT / CGNAT pairs may simply fail to connect.
+  Written down plainly in the docs rather than discovered the hard way.
+- A progressive roadmap toward real users: durable identity → onboarding → measured
+  connectivity → hardening → desktop comfort.
+
 ### 2026-06-21 — The keyring decides who gets in
 On this day in 1788 New Hampshire became the ninth state to ratify the
 Constitution — the vote that finally made it binding, proof that a network springs

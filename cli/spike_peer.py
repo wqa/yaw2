@@ -12,12 +12,15 @@ keyring ~/.yaw/keyring. Type a line to chat; /help for commands.
 from __future__ import annotations
 
 import asyncio
+import getpass
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from yaw2 import Identity, Keyring, Node, net_hash
+from yaw2.keybackup import encrypt_seed, decrypt_seed
 
 SIGNAL_URL = "wss://fnlr.se/4802f621018e1968/signal"
 HOME = os.path.expanduser("~/.yaw")
@@ -117,6 +120,8 @@ async def main():
                   "  /accept <id>            trust a peer id (connects if present)\n"
                   "  /keys                   list trusted ids\n"
                   "  /forget <id>            remove a trusted id\n"
+                  "  /export <file>          write a passphrase-encrypted key backup\n"
+                  "  /import <file>          restore identity from a key backup (then restart)\n"
                   "  /peers                  list connected peers\n"
                   "  /share                  list files you share\n"
                   "  /browse <id-prefix>     list a peer's shared files\n"
@@ -138,6 +143,23 @@ async def main():
                 print(f"    {i}")
         elif cmd == "/forget" and len(parts) >= 2:
             print("  removed" if kr.remove(parts[1]) else "  not in keyring")
+        elif cmd == "/export" and len(parts) >= 2:
+            pw = await loop.run_in_executor(None, getpass.getpass, "  passphrase: ")
+            if pw:
+                with open(parts[1], "w") as fh:
+                    json.dump(encrypt_seed(ident.seed_hex, pw), fh, indent=2)
+                os.chmod(parts[1], 0o600)
+                print(f"  backup written to {parts[1]} (same file restores you in the web client too)")
+        elif cmd == "/import" and len(parts) >= 2:
+            pw = await loop.run_in_executor(None, getpass.getpass, "  passphrase: ")
+            try:
+                seed = decrypt_seed(json.load(open(parts[1])), pw)
+                with open(ID_PATH, "w") as fh:
+                    fh.write(seed)
+                os.chmod(ID_PATH, 0o600)
+                print(f"  identity {Identity.from_seed_hex(seed).short} restored — restart to use it")
+            except Exception:
+                print("  import failed (wrong passphrase or bad file)")
         elif cmd == "/peers":
             if not node.peers:
                 print("  (no peers)")
