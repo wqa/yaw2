@@ -214,10 +214,16 @@ class Node:
 
     async def start(self):
         present = await self.sig.connect()
-        asyncio.ensure_future(self.sig.run(self._on_from, self._on_join, self._on_leave))
+        asyncio.ensure_future(self.sig.run(self._on_from, self._on_join,
+                                           self._on_leave, self._on_reconnect))
         for pid in present:
             await self._try_connect(pid)
         asyncio.ensure_future(self._reconcile())
+
+    async def _on_reconnect(self, present):
+        self.on_event("signaling", state="reconnected", peers=len(present))
+        for pid in present:                 # offerer re-offers any link that isn't live
+            await self._try_connect(pid)
 
     def _new_peer(self, pid: str) -> YawPeer:
         old = self.peers.get(pid)

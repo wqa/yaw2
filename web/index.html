@@ -171,6 +171,7 @@
         refreshPeers();
         if (kw.state === 'failed') line('sys', `could not connect to ${label(kw.peer)} — likely a restrictive NAT; try another network for one side.`);
       }
+      else if (kind === 'signaling') { line('sys', `signaling ${kw.state} (${kw.peers} peer(s) present)`); refreshPeers(); }
       else if (kind === 'peer-leave') { line('sys', `- ${label(kw.peer)} left`); refreshPeers(); }
       else if (kind === 'chat') line('', `<b>${label(kw.peer)}</b>: ${esc(kw.text)}`);
       else if (kind === 'files') {

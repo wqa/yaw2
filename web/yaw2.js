@@ -113,11 +113,22 @@ const YAW = (() => {
   }
 
   class Signaling {
-    constructor(url, identity, net) { this.url = url; this.id = identity; this.net = net; this.ws = null; }
-    connect(onFrom, onJoin, onLeave) {
+    constructor(url, identity, net) {
+      this.url = url; this.id = identity; this.net = net; this.ws = null;
+      this._closed = false; this._backoff = 1000; this._cbs = {};
+    }
+    // Auto-reconnects (re-auth + resync) on a dropped socket. Active WebRTC links
+    // are P2P and survive a signaling blip; this restores presence + new links.
+    connect(onFrom, onJoin, onLeave, onReconnect) {
+      this._cbs = { onFrom, onJoin, onLeave, onReconnect };
+      return this._open(true);
+    }
+    _open(initial) {
       return new Promise((resolve, reject) => {
         const ws = new WebSocket(this.url); this.ws = ws;
-        ws.onerror = () => reject(new Error('signaling connection failed'));
+        let joined = false;
+        ws.onerror = () => { if (initial && !joined) reject(new Error('signaling connection failed')); };
+        ws.onclose = () => { if (!this._closed) this._scheduleReconnect(); };
         ws.onmessage = (ev) => {
           const m = JSON.parse(ev.data);
           if (m.type === 'challenge') {
@@ -125,17 +136,27 @@ const YAW = (() => {
             const sig = S.to_hex(this.id.sign(concat(nonce, enc(this.net))));
             ws.send(JSON.stringify({ type: 'join', id: this.id.id, net: this.net, sig }));
           } else if (m.type === 'joined') {
-            resolve(m.peers || []);
+            joined = true; this._backoff = 1000;
+            const peers = m.peers || [];
+            if (initial) resolve(peers);
+            else if (this._cbs.onReconnect) this._cbs.onReconnect(peers);
           } else if (m.type === 'from') {
-            try { onFrom(m.from, JSON.parse(S.to_string(this.id.open(m.from, m.box)))); } catch (e) {}
-          } else if (m.type === 'peer-join') onJoin(m.id);
-          else if (m.type === 'peer-leave') onLeave(m.id);
+            try { this._cbs.onFrom(m.from, JSON.parse(S.to_string(this.id.open(m.from, m.box)))); } catch (e) {}
+          } else if (m.type === 'peer-join') this._cbs.onJoin(m.id);
+          else if (m.type === 'peer-leave') this._cbs.onLeave(m.id);
         };
       });
     }
-    sendTo(toId, obj) {
-      this.ws.send(JSON.stringify({ type: 'to', to: toId, box: this.id.seal(toId, enc(JSON.stringify(obj))) }));
+    _scheduleReconnect() {
+      if (this._closed) return;
+      const delay = this._backoff;
+      this._backoff = Math.min(this._backoff * 2, 30000);
+      setTimeout(() => { if (!this._closed) this._open(false).catch(() => {}); }, delay);
     }
+    sendTo(toId, obj) {
+      try { this.ws.send(JSON.stringify({ type: 'to', to: toId, box: this.id.seal(toId, enc(JSON.stringify(obj))) })); } catch (e) {}
+    }
+    close() { this._closed = true; if (this.ws) this.ws.close(); }
   }
 
   function gatherComplete(pc) {
@@ -284,9 +305,15 @@ const YAW = (() => {
       const present = await this.sig.connect(
         (frm, obj) => this._onFrom(frm, obj),
         (pid) => { this.present.add(pid); this._tryConnect(pid); },
-        (pid) => { this.present.delete(pid); delete this.peers[pid]; this.on('peer-leave', { peer: pid }); });
+        (pid) => { this.present.delete(pid); delete this.peers[pid]; this.on('peer-leave', { peer: pid }); },
+        (peers) => this._onReconnect(peers));
       for (const pid of present) { this.present.add(pid); await this._tryConnect(pid); }
       setInterval(() => { for (const pid of this.present) this._tryConnect(pid); }, 4000);
+    }
+    _onReconnect(peers) {
+      this.on('signaling', { state: 'reconnected', peers: peers.length });
+      this.present = new Set(peers);                 // 'joined' is authoritative after a blip
+      for (const pid of peers) this._tryConnect(pid);
     }
     _newPeer(pid) {
       const old = this.peers[pid];
