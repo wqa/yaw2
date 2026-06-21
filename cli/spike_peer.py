@@ -19,14 +19,29 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from yaw2 import Identity, Keyring, Node, net_hash
+from yaw2 import Identity, Keyring, Node, net_hash, make_card, parse_card
 from yaw2.keybackup import encrypt_seed, decrypt_seed
+from yaw2.keyring import clean_nick
 
 SIGNAL_URL = "wss://fnlr.se/4802f621018e1968/signal"
 HOME = os.path.expanduser("~/.yaw")
 DOWNLOADS = os.path.join(HOME, "downloads")
 ID_PATH = os.path.join(HOME, "identity")
 KEY_PATH = os.path.join(HOME, "keyring")
+NICK_PATH = os.path.join(HOME, "nick")
+
+
+def load_nick() -> str:
+    if os.path.exists(NICK_PATH):
+        with open(NICK_PATH) as fh:
+            return clean_nick(fh.read())
+    return ""
+
+
+def save_nick(nick: str):
+    os.makedirs(HOME, exist_ok=True)
+    with open(NICK_PATH, "w") as fh:
+        fh.write(clean_nick(nick))
 
 
 def load_identity() -> Identity:
@@ -43,24 +58,32 @@ def load_identity() -> Identity:
 
 
 def parse_args(argv):
-    netname, share = "spike-room", os.path.join(HOME, "share")
+    netname, share, nick = "spike-room", os.path.join(HOME, "share"), None
     it = iter(argv)
     for a in it:
         if a == "--share":
             share = next(it, share)
+        elif a == "--nick":
+            nick = next(it, None)
         elif not a.startswith("-"):
             netname = a
-    return netname, share
+    return netname, share, nick
 
 
 async def main():
-    netname, share_dir = parse_args(sys.argv[1:])
+    netname, share_dir, nick_arg = parse_args(sys.argv[1:])
     os.makedirs(share_dir, exist_ok=True)
     os.makedirs(DOWNLOADS, exist_ok=True)
     ident = load_identity()
     kr = Keyring(KEY_PATH)
+    if nick_arg is not None:
+        save_nick(nick_arg)
+    my_nick = load_nick()
     node = None
     warned = set()
+
+    def label(pid):                         # nickname if we've named them, else short id
+        return kr.name(pid) or (pid[:8] + "…")
 
     def resolve(prefix):
         prefix = prefix.lower()
@@ -70,36 +93,38 @@ async def main():
     def on_event(kind, **kw):
         if kind == "connected":
             shares = "share" in (kw.get("caps") or [])
-            print(f"[+] {kw['peer'][:12]}… connected  verified={kw['verified']}"
-                  f"{'  (shares files)' if shares else ''}")
+            hint = "" if kr.name(kw["peer"]) else (f"  (calls itself '{kw['nick']}')" if kw.get("nick") else "")
+            print(f"[+] {label(kw['peer'])} connected  verified={kw['verified']}"
+                  f"{'  (shares files)' if shares else ''}{hint}")
         elif kind == "untrusted":
             if kw["peer"] not in warned:           # one nudge per id
                 warned.add(kw["peer"])
-                print(f"[trust] {kw['peer'][:16]}… wants to connect — not in your keyring.\n"
-                      f"        /accept {kw['peer']}  to allow.")
+                print(f"[trust] someone wants to connect — not in your keyring.\n"
+                      f"        /accept {kw['peer']} <nickname>   to allow.")
         elif kind == "peer-leave":
-            print(f"[-] {kw['peer'][:12]}… left")
+            print(f"[-] {label(kw['peer'])} left")
         elif kind == "chat":
-            print(f"<{kw['peer'][:8]}> {kw['text']}")
+            print(f"<{label(kw['peer'])}> {kw['text']}")
         elif kind == "files":
             entries = kw["entries"]
-            print(f"[files] {kw['peer'][:8]}… shares {len(entries)} file(s):")
+            print(f"[files] {label(kw['peer'])} shares {len(entries)} file(s):")
             for e in entries:
                 print(f"    {e['name']:<32} {e['size']:>12,} B")
         elif kind == "no-file":
-            print(f"[files] {kw['peer'][:8]}… has no '{kw['name']}'")
+            print(f"[files] {label(kw['peer'])} has no '{kw['name']}'")
         elif kind == "file-recv":
             path = os.path.join(DOWNLOADS, os.path.basename(kw["name"]))
             with open(path, "wb") as fh:
                 fh.write(kw["data"])
             print(f"[file] '{kw['name']}' ({kw['size']:,} B) ok={kw['ok']} -> {path}")
 
-    print(f"[cli peer] id {ident.id}")
-    print(f"[cli peer] net '{netname}'  sharing {share_dir}  trusting {len(kr.all())} key(s)")
+    print(f"[cli peer] you are {my_nick or '(no nick — set one with /nick)'}")
+    print(f"[cli peer] your card: {make_card(ident.id, my_nick)}")
+    print(f"[cli peer] net '{netname}'  sharing {share_dir}  trusting {len(kr.all())} contact(s)")
     node = Node(SIGNAL_URL, ident, net_hash(netname), on_event,
-                share_dir=share_dir, keyring=kr)
+                share_dir=share_dir, keyring=kr, nick=my_nick)
     await node.start()
-    print("[cli peer] connected — share /id with friends, /accept their id. /help for more.")
+    print("[cli peer] connected — share /me with friends, /accept their card. /help for more.")
 
     loop = asyncio.get_event_loop()
     while True:
@@ -116,31 +141,49 @@ async def main():
         parts = text.split()
         cmd = parts[0]
         if cmd == "/help":
-            print("  /id                     show your id (give it to friends)\n"
-                  "  /accept <id>            trust a peer id (connects if present)\n"
-                  "  /keys                   list trusted ids\n"
-                  "  /forget <id>            remove a trusted id\n"
-                  "  /export <file>          write a passphrase-encrypted key backup\n"
-                  "  /import <file>          restore identity from a key backup (then restart)\n"
-                  "  /peers                  list connected peers\n"
-                  "  /share                  list files you share\n"
-                  "  /browse <id-prefix>     list a peer's shared files\n"
-                  "  /get <id-prefix> <name> download a file from a peer\n"
-                  "  <text>                  chat to all peers")
+            print("  /me                       show your contact card (give it to friends)\n"
+                  "  /id                       show your raw id\n"
+                  "  /nick <name>              set your own nickname\n"
+                  "  /accept <card|id> [nick]  trust a contact (connects if present)\n"
+                  "  /name <id-prefix> <nick>  (re)label a trusted contact\n"
+                  "  /keys                     list trusted contacts + nicknames\n"
+                  "  /forget <id>              remove a trusted id\n"
+                  "  /export <file>            write a passphrase-encrypted key backup\n"
+                  "  /import <file>            restore identity from a key backup (then restart)\n"
+                  "  /peers                    list connected peers\n"
+                  "  /share                    list files you share\n"
+                  "  /browse <id-prefix>       list a peer's shared files\n"
+                  "  /get <id-prefix> <name>   download a file from a peer\n"
+                  "  <text>                    chat to all peers")
+        elif cmd == "/me":
+            print(f"  {make_card(ident.id, node.nick)}")
         elif cmd == "/id":
             print(f"  {ident.id}")
+        elif cmd == "/nick" and len(parts) >= 2:
+            node.nick = clean_nick(" ".join(parts[1:]))
+            save_nick(node.nick)
+            print(f"  you are now '{node.nick}' (new connections will see this)")
         elif cmd == "/accept" and len(parts) >= 2:
             try:
-                added = await node.accept(parts[1])
-                warned.discard(parts[1].strip().lower())
-                print(f"  {'accepted' if added else 'already trusted'}: {parts[1][:16]}…")
+                pid, card_nick = parse_card(parts[1])
+                nick = " ".join(parts[2:]) if len(parts) > 2 else card_nick
+                added = await node.accept(pid, nick)
+                warned.discard(pid)
+                print(f"  {'accepted' if added else 'updated'}: {kr.name(pid) or pid[:16] + '…'}")
             except ValueError as e:
                 print(f"  {e}")
+        elif cmd == "/name" and len(parts) >= 3:
+            cand = [i for i in kr.all() if i.startswith(parts[1].lower())]
+            if len(cand) == 1:
+                kr.rename(cand[0], " ".join(parts[2:]))
+                print(f"  renamed {cand[0][:12]}… to '{kr.name(cand[0])}'")
+            else:
+                print("  no single trusted id matches that prefix")
         elif cmd == "/keys":
-            ids = kr.all()
-            print(f"  trusting {len(ids)} id(s):")
-            for i in ids:
-                print(f"    {i}")
+            entries = kr.entries()
+            print(f"  trusting {len(entries)} contact(s):")
+            for nid, nk in entries:
+                print(f"    {nid}  {nk or '(no nick)'}")
         elif cmd == "/forget" and len(parts) >= 2:
             print("  removed" if kr.remove(parts[1]) else "  not in keyring")
         elif cmd == "/export" and len(parts) >= 2:
@@ -165,7 +208,7 @@ async def main():
                 print("  (no peers)")
             for pid, p in node.peers.items():
                 caps = getattr(p, "peer_caps", [])
-                print(f"  {pid[:16]}…  verified={p.verified}  "
+                print(f"  {label(pid):<16}  {pid[:12]}…  verified={p.verified}  "
                       f"{'shares' if 'share' in caps else ''}")
         elif cmd == "/share":
             if node.share:

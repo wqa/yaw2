@@ -59,3 +59,17 @@ which is **not a backup** — clearing browser data or losing the device loses i
 Export a **passphrase-encrypted key backup** (`*.yawkey`) and store it safely; the
 same file restores your identity in the web client *and* the CLI (one format, verified
 byte-identical across libsodium.js and PyNaCl).
+
+### Contact card (`yaw-contact-1`)
+
+To add each other, friends swap a **contact card** — a single shareable string that
+bundles an id with a *suggested* nickname:
+
+```
+yaw:<id>?n=<percent-encoded-nick>      e.g.  yaw:7f27…d16b?n=Felix
+```
+
+The `id` is self-certifying (it's the Ed25519 public key — nobody can connect as it
+without the private key). The nickname is only a **local label** the recipient may
+keep or change; it is **not authenticated** and never affects trust. Clients show
+nicknames in place of raw ids. Bare ids (no `yaw:`/`?n=`) are still accepted.

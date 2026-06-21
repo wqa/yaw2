@@ -33,12 +33,13 @@ def _dtls_fp(sdp: str) -> bytes:
 
 class YawPeer:
     def __init__(self, identity: Identity, signaling: Signaling, peer_id: str, on_event,
-                 share=None):
+                 share=None, nick=""):
         self.id = identity
         self.sig = signaling
         self.peer_id = peer_id
         self.on_event = on_event
         self.share = share          # FileShare or None (we host a browsable folder)
+        self.nick = nick            # our self-asserted display nick (informational)
         self.pc = RTCPeerConnection(RTCConfiguration([RTCIceServer(urls=STUN)]))
         self.dc = None
         self.verified = False
@@ -96,7 +97,7 @@ class YawPeer:
             print(f"[dbg {self.id.id[:4]}] dc OPEN -> sending hello (offerer={self.id.id < self.peer_id})")
         bind = BIND_PREFIX + _dtls_fp(self.pc.localDescription.sdp) + _dtls_fp(self.pc.remoteDescription.sdp)
         caps = ["share"] if self.share else []
-        self.dc.send(json.dumps({"type": "hello", "id": self.id.id, "nick": "py",
+        self.dc.send(json.dumps({"type": "hello", "id": self.id.id, "nick": self.nick,
                                  "caps": caps, "sig": self.id.sign(bind).hex()}))
 
     async def _on_control(self, message):
@@ -193,7 +194,7 @@ class Node:
     RETRY_AFTER = 12    # re-offer a link that hasn't verified within this many seconds
 
     def __init__(self, url: str, identity: Identity, net: str, on_event,
-                 share_dir=None, keyring=None):
+                 share_dir=None, keyring=None, nick=""):
         self.id = identity
         self.net = net
         self.on_event = on_event
@@ -201,6 +202,7 @@ class Node:
         self.peers: dict[str, YawPeer] = {}
         self.share = FileShare(share_dir) if share_dir else None
         self.keyring = keyring
+        self.nick = nick
 
     def _trusted(self, pid: str) -> bool:
         return self.keyring is None or self.keyring.trusts(pid)
@@ -219,7 +221,7 @@ class Node:
                 asyncio.ensure_future(old.pc.close())
             except Exception:
                 pass
-        peer = YawPeer(self.id, self.sig, pid, self.on_event, share=self.share)
+        peer = YawPeer(self.id, self.sig, pid, self.on_event, share=self.share, nick=self.nick)
         peer.created = time.monotonic()
         self.peers[pid] = peer
         return peer
@@ -267,9 +269,9 @@ class Node:
             for pid in list(self.sig.peers):
                 await self._try_connect(pid)
 
-    async def accept(self, node_id: str) -> bool:
-        """Trust an id; connect immediately if it's present."""
-        added = self.keyring.accept(node_id) if self.keyring else False
+    async def accept(self, node_id: str, nick: str = "") -> bool:
+        """Trust an id (with an optional nickname); connect immediately if present."""
+        added = self.keyring.accept(node_id, nick) if self.keyring else False
         node_id = node_id.strip().lower()
         if node_id in self.sig.peers:
             await self._try_connect(node_id)

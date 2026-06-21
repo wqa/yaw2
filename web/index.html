@@ -39,13 +39,17 @@
     <h3>Join</h3>
     <input id="url" value="wss://fnlr.se/4802f621018e1968/signal" />
     <input id="net" value="spike-room" placeholder="network name" />
-    <input id="nick" value="web" placeholder="nick" />
     <button id="join" class="primary">Connect</button>
 
+    <h3>You</h3>
+    <input id="nick" placeholder="your nickname" />
+    <button id="setnick">Set nickname</button>
+    <div id="mycard" class="mono" style="font-size:.64rem; word-break:break-all; cursor:pointer" title="click to copy your contact card"></div>
+
     <h3>Trust</h3>
-    <div id="myid" class="mono" style="font-size:.68rem; word-break:break-all; cursor:pointer" title="click to copy your id"></div>
-    <input id="acceptid" placeholder="friend's id (64 hex)" />
-    <button id="accept">Accept key</button>
+    <input id="acceptid" placeholder="paste a friend's card (or id)" />
+    <input id="acceptnick" placeholder="nickname for them (optional)" />
+    <button id="accept">Accept</button>
     <div id="keys" class="muted" style="font-size:.72rem; margin-top:.4rem"></div>
     <div style="margin-top:.5rem">
       <button id="backupkey">Back up key</button>
@@ -86,11 +90,31 @@
 
     let node = null, ident = null;
     const untrusted = new Set();
+    const label = (id) => { const n = node && node.keyring.name(id); return n ? esc(n) : short(id); };
+    const myNick = () => node ? node.nick : YAW.cleanNick(localStorage.getItem('yaw2_nick') || '');
+
+    function refreshMe() {
+      if (!ident) return;
+      const card = YAW.makeCard(ident.id, myNick());
+      $('mycard').textContent = card;
+      $('mycard').onclick = () => { navigator.clipboard?.writeText(card); line('sys', 'contact card copied to clipboard'); };
+      if (!$('nick').value) $('nick').value = myNick();
+      $('me').textContent = 'you: ' + (myNick() || ident.short);
+    }
 
     function refreshKeys() {
       if (!node) return;
-      const ids = node.keyring.all();
-      $('keys').textContent = ids.length ? `trusting ${ids.length}: ` + ids.map(i => i.slice(0, 8) + '…').join(', ') : 'trusting nobody yet';
+      const entries = node.keyring.entries();
+      $('keys').innerHTML = '';
+      if (!entries.length) { $('keys').textContent = 'trusting nobody yet'; return; }
+      $('keys').appendChild(document.createTextNode(`trusting ${entries.length}:`));
+      for (const [id, nk] of entries) {
+        const row = document.createElement('div');
+        row.style.cssText = 'cursor:pointer'; row.title = 'click to rename';
+        row.textContent = '  ' + (nk || '(no nick)') + ' · ' + id.slice(0, 8) + '…';
+        row.onclick = () => { const nn = prompt('Nickname for ' + id.slice(0, 12) + '…', nk || ''); if (nn !== null) { node.keyring.rename(id, nn); refreshKeys(); refreshPeers(); } };
+        $('keys').appendChild(row);
+      }
     }
 
     function refreshPeers() {
@@ -99,7 +123,7 @@
       $('peers').innerHTML = '';
       for (const p of peers) {
         const d = document.createElement('div'); d.className = 'peer mono';
-        d.innerHTML = short(p.peerId) + (p.verified ? '<span class="badge ok">verified</span>' : '<span class="badge warn">…</span>');
+        d.innerHTML = label(p.peerId) + (p.verified ? '<span class="badge ok">verified</span>' : '<span class="badge warn">…</span>');
         if (p.verified) {
           const b = document.createElement('button');
           b.textContent = 'browse'; b.style.cssText = 'font-size:.7rem;margin-left:.4rem;padding:.05rem .4rem';
@@ -111,26 +135,30 @@
     }
 
     function onEvent(kind, kw) {
-      if (kind === 'connected') { line('sys', `+ ${short(kw.peer)} connected ${kw.verified ? '(identity verified ✓)' : '(UNVERIFIED!)'}`); refreshPeers(); }
+      if (kind === 'connected') {
+        const hint = (!(node && node.keyring.name(kw.peer)) && kw.nick) ? ` (calls itself “${esc(kw.nick)}”)` : '';
+        line('sys', `+ ${label(kw.peer)} connected ${kw.verified ? '(identity verified ✓)' : '(UNVERIFIED!)'}${hint}`); refreshPeers();
+      }
       else if (kind === 'untrusted') {
         if (untrusted.has(kw.peer)) return; untrusted.add(kw.peer);
         const d = document.createElement('div'); d.className = 'line sys';
-        d.innerHTML = `<b>${short(kw.peer)}</b> wants to connect — not in your keyring. `;
+        d.innerHTML = `someone wants to connect — not in your keyring. `;
         const b = document.createElement('button'); b.textContent = 'accept';
         b.style.cssText = 'font-size:.7rem;padding:.05rem .4rem';
         b.onclick = async () => {
-          try { await node.accept(kw.peer); untrusted.delete(kw.peer); refreshKeys(); line('sys', `accepted ${short(kw.peer)} — connecting…`); }
+          const nn = prompt('Nickname for this contact (optional):', kw.nick || '');
+          try { await node.accept(kw.peer, nn || ''); untrusted.delete(kw.peer); refreshKeys(); line('sys', `accepted ${label(kw.peer)} — connecting…`); }
           catch (e) { line('sys', 'error: ' + esc(e.message)); }
         };
         d.appendChild(b);
         const c = document.createElement('div'); c.className = 'mono muted'; c.style.cssText = 'font-size:.6rem;word-break:break-all'; c.textContent = kw.peer;
         d.appendChild(c); log.appendChild(d); log.scrollTop = log.scrollHeight;
       }
-      else if (kind === 'peer-leave') { line('sys', `- ${short(kw.peer)} left`); refreshPeers(); }
-      else if (kind === 'chat') line('', `<b>${short(kw.peer)}</b>: ${esc(kw.text)}`);
+      else if (kind === 'peer-leave') { line('sys', `- ${label(kw.peer)} left`); refreshPeers(); }
+      else if (kind === 'chat') line('', `<b>${label(kw.peer)}</b>: ${esc(kw.text)}`);
       else if (kind === 'files') {
-        if (!kw.entries.length) { line('sys', `${short(kw.peer)} shares nothing`); return; }
-        line('sys', `${short(kw.peer)} shares:`);
+        if (!kw.entries.length) { line('sys', `${label(kw.peer)} shares nothing`); return; }
+        line('sys', `${label(kw.peer)} shares:`);
         for (const e of kw.entries) {
           const d = document.createElement('div'); d.className = 'line';
           d.innerHTML = `&nbsp;&nbsp;${esc(e.name)} <span class="muted">${e.size} B</span> `;
@@ -140,8 +168,8 @@
           d.appendChild(b); log.appendChild(d); log.scrollTop = log.scrollHeight;
         }
       }
-      else if (kind === 'no-file') line('sys', `${short(kw.peer)} has no “${esc(kw.name)}”`);
-      else if (kind === 'file-incoming') line('sys', `incoming file “${esc(kw.name)}” (${kw.size} B) from ${short(kw.peer)}…`);
+      else if (kind === 'no-file') line('sys', `${label(kw.peer)} has no “${esc(kw.name)}”`);
+      else if (kind === 'file-incoming') line('sys', `incoming file “${esc(kw.name)}” (${kw.size} B) from ${label(kw.peer)}…`);
       else if (kind === 'file-recv') {
         if (!kw.ok) { line('sys', `file “${esc(kw.name)}” FAILED hash check`); return; }
         const urlObj = URL.createObjectURL(kw.blob);
@@ -154,12 +182,9 @@
       try {
         await YAW.ready();
         ident = YAW.Identity.load();
-        $('me').textContent = 'you: ' + ident.short;
-        $('myid').textContent = ident.id;
-        $('myid').onclick = () => { navigator.clipboard?.writeText(ident.id); line('sys', 'your id copied to clipboard'); };
         const net = YAW.netHash($('net').value.trim());
         node = new YAW.Node($('url').value.trim(), ident, net, onEvent);
-        refreshKeys();
+        refreshMe(); refreshKeys();
         line('sys', `joining network “${esc($('net').value.trim())}”…`);
         await node.start();
         line('sys', 'connected to signaling — waiting for peers (open this page elsewhere or run the CLI peer).');
@@ -177,10 +202,20 @@
 
     $('accept').onclick = async () => {
       if (!node) { line('sys', 'connect first'); return; }
-      const id = $('acceptid').value.trim();
-      try { const added = await node.accept(id); $('acceptid').value = ''; refreshKeys();
-        line('sys', added ? `accepted ${short(id)} — will connect if present` : `${short(id)} already trusted`); }
-      catch (e) { line('sys', 'error: ' + esc(e.message)); }
+      try {
+        const card = YAW.parseCard($('acceptid').value);
+        const nn = $('acceptnick').value.trim() || card.nick;
+        const added = await node.accept(card.id, nn);
+        $('acceptid').value = ''; $('acceptnick').value = ''; refreshKeys();
+        const who = node.keyring.name(card.id) || short(card.id);
+        line('sys', added ? `accepted ${who} — will connect if present` : `${who} updated`);
+      } catch (e) { line('sys', 'error: ' + esc(e.message)); }
+    };
+    $('setnick').onclick = () => {
+      const v = $('nick').value.trim();
+      if (node) node.setNick(v); else localStorage.setItem('yaw2_nick', YAW.cleanNick(v));
+      refreshMe();
+      line('sys', 'nickname set: ' + (myNick() || '(none)'));
     };
 
     $('backupkey').onclick = () => {
@@ -202,8 +237,7 @@
       try {
         await YAW.ready();
         ident = YAW.Identity.importBackup(JSON.parse(await f.text()), pass);
-        $('me').textContent = 'you: ' + ident.short;
-        $('myid').textContent = ident.id;
+        refreshMe();
         line('sys', `identity restored: ${ident.short} — ${node ? 'reconnect' : 'connect'} to use it.`);
       } catch (e) { line('sys', 'restore failed (wrong passphrase or bad file): ' + esc(e.message)); }
       $('keyfile').value = '';
@@ -226,14 +260,12 @@
       }
     };
 
-    // Load identity on page open so the id + backup work before connecting.
+    // Load identity on page open so the card + backup work before connecting.
     (async () => {
       try {
         await YAW.ready();
         ident = YAW.Identity.load();
-        $('me').textContent = 'you: ' + ident.short;
-        $('myid').textContent = ident.id;
-        $('myid').onclick = () => { navigator.clipboard?.writeText(ident.id); line('sys', 'your id copied to clipboard'); };
+        refreshMe();
       } catch (e) { /* sodium not ready yet; join() will load it */ }
     })();
   </script>

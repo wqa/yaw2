@@ -4,6 +4,24 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-21 — Putting a name to the number
+On the longest day of the year — when the sun lingers as if reluctant to forget a
+single face — we taught YAW to remember names. On this day in 1834 Cyrus McCormick
+patented the mechanical reaper, turning a field of anonymous stalks into a countable
+harvest; we turn a field of 64-hex ids into people you recognize.
+
+- **Nicknames.** Every trusted contact can carry a local nickname; clients now show
+  "Felix" instead of `7f27…`, in chat, presence, browse and the peer list. Stored
+  beside the id in the keyring (CLI `~/.yaw/keyring`, web localStorage); set your own
+  with `/nick` (CLI) or the *You* panel (web). Labels are local and unauthenticated —
+  they never affect trust.
+- **Contact card `yaw-contact-1`.** Share one string — `yaw:<id>?n=<nick>` — that
+  bundles your id with a *suggested* nickname, so a friend adds you in one paste. The
+  id stays self-certifying; the nick is only a hint. Verified byte-parity between the
+  web and CLI in both directions (unicode and parentheses and all).
+- CLI: `/me` `/nick` `/accept <card|id> [nick]` `/name`; web: nickname + a copyable
+  card in the *You* panel, an accept-a-card field, and a click-to-rename keyring.
+
 ### 2026-06-21 — One key file, everywhere (and a candid word on NAT)
 On this day in 1948 the first stored program ran; on this day in 1990 a magnitude-7.4
 quake in Iran reminded everyone that the ground you build on matters. So we made

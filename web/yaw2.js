@@ -48,6 +48,28 @@ const YAW = (() => {
     return S.crypto_secretbox_open_easy(ub(b.ct), ub(b.nonce), key);   // throws on wrong passphrase
   }
 
+  // --- nicknames + shareable contact card (format yaw-contact-1) ---------------
+  function cleanNick(nick) {
+    if (!nick) return '';
+    nick = [...String(nick)].filter((ch) => { const c = ch.codePointAt(0); return c >= 0x20 && c !== 0x7f; }).join('');
+    return nick.trim().slice(0, 40);
+  }
+  function makeCard(id, nick) {
+    id = (id || '').toLowerCase();
+    nick = cleanNick(nick);
+    return 'yaw:' + id + (nick ? '?n=' + encodeURIComponent(nick) : '');
+  }
+  function parseCard(text) {
+    text = (text || '').trim();
+    if (text.startsWith('yaw:')) text = text.slice(4);
+    let nick = '';
+    const i = text.indexOf('?n=');
+    if (i >= 0) { nick = cleanNick(decodeURIComponent(text.slice(i + 3))); text = text.slice(0, i); }
+    const id = text.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('not a valid id / contact card');
+    return { id, nick };
+  }
+
   class Identity {
     constructor(kp) {
       this.pub = kp.publicKey; this.priv = kp.privateKey;
@@ -125,9 +147,10 @@ const YAW = (() => {
   }
 
   class Peer {
-    constructor(id, sig, peerId, on, share) {
+    constructor(id, sig, peerId, on, share, nick) {
       this.id = id; this.sig = sig; this.peerId = peerId; this.on = on;
       this.share = share || null;   // Map<name, File> we host (optional)
+      this.nick = nick || '';       // our self-asserted display nick (informational)
       this.pc = new RTCPeerConnection({ iceServers: [{ urls: STUN }] });
       this.dc = null; this.verified = false; this.caps = [];
       this._recv = {}; this._send = {};
@@ -165,7 +188,7 @@ const YAW = (() => {
     _sendHello() {
       const bind = concat(enc(BIND_PREFIX), dtlsFp(this.pc.localDescription.sdp), dtlsFp(this.pc.remoteDescription.sdp));
       const caps = (this.share && this.share.size) ? ['share'] : [];
-      this.dc.send(JSON.stringify({ type: 'hello', id: this.id.id, nick: 'web', caps, sig: S.to_hex(this.id.sign(bind)) }));
+      this.dc.send(JSON.stringify({ type: 'hello', id: this.id.id, nick: this.nick, caps, sig: S.to_hex(this.id.sign(bind)) }));
     }
     requestBrowse() { if (this.dc) this.dc.send(JSON.stringify({ type: 'browse' })); }
     requestGet(name) { if (this.dc) this.dc.send(JSON.stringify({ type: 'get', name })); }
@@ -223,17 +246,25 @@ const YAW = (() => {
   }
 
   class Keyring {
-    // Trusted peer ids, persisted in localStorage. Friend-to-friend (spec §6).
-    constructor() { this.ids = new Set(JSON.parse(localStorage.getItem('yaw2_keyring') || '[]')); }
-    trusts(id) { return this.ids.has((id || '').toLowerCase()); }
-    accept(id) {
+    // Trusted peer ids + local nicknames, in localStorage. Friend-to-friend (§6).
+    constructor() {
+      const raw = JSON.parse(localStorage.getItem('yaw2_keyring') || '{}');
+      this.names = Array.isArray(raw) ? Object.fromEntries(raw.map((id) => [id, ''])) : (raw || {});
+    }
+    trusts(id) { return ((id || '').toLowerCase()) in this.names; }
+    name(id) { return this.names[(id || '').toLowerCase()] || ''; }
+    accept(id, nick) {
       id = (id || '').trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('not a valid id (need 64 hex chars)');
-      const had = this.ids.has(id); this.ids.add(id); this._save(); return !had;
+      const existed = id in this.names;
+      this.names[id] = cleanNick(nick) || this.names[id] || '';
+      this._save(); return !existed;
     }
-    remove(id) { id = (id || '').trim().toLowerCase(); const had = this.ids.delete(id); this._save(); return had; }
-    all() { return [...this.ids].sort(); }
-    _save() { localStorage.setItem('yaw2_keyring', JSON.stringify([...this.ids])); }
+    rename(id, nick) { id = (id || '').toLowerCase(); if (!(id in this.names)) return false; this.names[id] = cleanNick(nick); this._save(); return true; }
+    remove(id) { id = (id || '').toLowerCase(); const had = delete this.names[id]; this._save(); return had; }
+    all() { return Object.keys(this.names).sort(); }
+    entries() { return Object.entries(this.names).sort((a, b) => (a[0] < b[0] ? -1 : 1)); }
+    _save() { localStorage.setItem('yaw2_keyring', JSON.stringify(this.names)); }
   }
 
   class Node {
@@ -243,7 +274,9 @@ const YAW = (() => {
       this.shared = new Map();        // name -> File, the folder this tab hosts
       this.keyring = new Keyring();
       this.present = new Set();        // ids currently in the network
+      this.nick = cleanNick(localStorage.getItem('yaw2_nick') || '');
     }
+    setNick(nick) { this.nick = cleanNick(nick); localStorage.setItem('yaw2_nick', this.nick); return this.nick; }
     _trusted(pid) { return this.keyring.trusts(pid); }
     async start() {
       const present = await this.sig.connect(
@@ -256,7 +289,7 @@ const YAW = (() => {
     _newPeer(pid) {
       const old = this.peers[pid];
       if (old) { try { old.pc.close(); } catch (e) {} }
-      const p = new Peer(this.id, this.sig, pid, this.on, this.shared);
+      const p = new Peer(this.id, this.sig, pid, this.on, this.shared, this.nick);
       p.created = Date.now();
       this.peers[pid] = p; return p;
     }
@@ -281,8 +314,8 @@ const YAW = (() => {
         const p = this.peers[frm]; if (p) await p.handleSignal(obj);
       }
     }
-    async accept(id) {
-      const added = this.keyring.accept(id);
+    async accept(id, nick) {
+      const added = this.keyring.accept(id, nick);
       id = id.trim().toLowerCase();
       if (this.present.has(id)) await this._tryConnect(id);
       return added;
@@ -290,5 +323,5 @@ const YAW = (() => {
     forget(id) { return this.keyring.remove(id); }
   }
 
-  return { ready, netHash, Identity, Keyring, Node };
+  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick };
 })();
