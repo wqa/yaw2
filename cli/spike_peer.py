@@ -103,6 +103,13 @@ async def main():
                 warned.add(kw["peer"])
                 print(f"[trust] someone wants to connect — not in your keyring.\n"
                       f"        /accept {kw['peer']} <nickname>   to allow.")
+        elif kind == "status":
+            st = kw["state"]
+            msg = {"connecting": "connecting…",
+                   "failed": "could not connect (likely a restrictive NAT — try another network)",
+                   "disconnected": "connection dropped"}.get(st)
+            if msg:
+                print(f"[net] {label(kw['peer'])}: {msg}")
         elif kind == "peer-leave":
             print(f"[-] {label(kw['peer'])} left")
         elif kind == "chat":

@@ -131,7 +131,12 @@
       $('peers').innerHTML = '';
       for (const p of peers) {
         const d = document.createElement('div'); d.className = 'peer mono';
-        d.innerHTML = label(p.peerId) + (p.verified ? '<span class="badge ok">verified</span>' : '<span class="badge warn">…</span>');
+        const st = p.pc.connectionState;
+        const badge = p.verified ? '<span class="badge ok">verified</span>'
+          : (st === 'failed' || st === 'disconnected') ? '<span class="badge warn">failed</span>'
+          : (st === 'connected') ? '<span class="badge ok">connected</span>'
+          : `<span class="badge warn">${st}…</span>`;
+        d.innerHTML = label(p.peerId) + badge;
         if (p.verified) {
           const b = document.createElement('button');
           b.textContent = 'browse'; b.style.cssText = 'font-size:.7rem;margin-left:.4rem;padding:.05rem .4rem';
@@ -161,6 +166,10 @@
         d.appendChild(b);
         const c = document.createElement('div'); c.className = 'mono muted'; c.style.cssText = 'font-size:.6rem;word-break:break-all'; c.textContent = kw.peer;
         d.appendChild(c); log.appendChild(d); log.scrollTop = log.scrollHeight;
+      }
+      else if (kind === 'status') {
+        refreshPeers();
+        if (kw.state === 'failed') line('sys', `could not connect to ${label(kw.peer)} — likely a restrictive NAT; try another network for one side.`);
       }
       else if (kind === 'peer-leave') { line('sys', `- ${label(kw.peer)} left`); refreshPeers(); }
       else if (kind === 'chat') line('', `<b>${label(kw.peer)}</b>: ${esc(kw.text)}`);

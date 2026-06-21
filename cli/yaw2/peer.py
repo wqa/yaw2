@@ -51,6 +51,10 @@ class YawPeer:
         def _on_dc(channel):
             self._wire(channel)
 
+        @self.pc.on("connectionstatechange")
+        def _on_conn_state():
+            self.on_event("status", peer=self.peer_id, state=self.pc.connectionState)
+
     # -- offer/answer ----------------------------------------------------------
     async def start_offer(self):
         self.dc = self.pc.createDataChannel("yaw")

@@ -156,6 +156,7 @@ const YAW = (() => {
       this.dc = null; this.verified = false; this.caps = [];
       this._recv = {}; this._send = {};
       this.pc.ondatachannel = (ev) => this._wire(ev.channel);
+      this.pc.onconnectionstatechange = () => this.on('status', { peer: this.peerId, state: this.pc.connectionState });
     }
     async startOffer() {
       this.dc = this.pc.createDataChannel('yaw');
