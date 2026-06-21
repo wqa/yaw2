@@ -75,6 +75,13 @@ network (TOFU)** — the keyring gate (policy #3) is the first thing to add. Tru
 cross-NAT traversal needs peers on *different* networks to validate. Tauri shell and
 `yaw/2.1` are not built yet.
 
+## For users
+
+- **[USERGUIDE.md](USERGUIDE.md)** — non-technical quick start: open the client, pick a
+  nickname, swap contact cards, accept, chat, share, back up your key.
+- **[KEYHANDLING.md](KEYHANDLING.md)** — how your identity is stored, backed up, and
+  moved between the CLI and the web client.
+
 ## Quick start
 
 A YAW/2 network is just a shared **name** (hashed for the server). Two peers on the
