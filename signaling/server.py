@@ -33,6 +33,24 @@ rooms: dict[str, dict[str, object]] = {}
 # (net, id) -> { "ip": str, "since": float }  — for the `yawpeers` admin tool
 meta: dict = {}
 
+# --- rate limiting (single asyncio loop -> no locks). Conservative: aimed at
+# floods, not normal use. A real session makes a handful of connections + frames.
+CONN_WINDOW = 60.0          # seconds
+CONN_MAX = 30               # new connections per IP per window
+CONC_MAX = 40               # concurrent connections per IP
+MSG_WINDOW = 10.0           # seconds
+MSG_MAX = 300               # relayed frames per connection per window
+_conn_hist: dict = {}       # ip -> [recent connect monotonic times]
+_conc: dict = {}            # ip -> concurrent connection count
+
+
+def _allow_connection(ip: str) -> bool:
+    now = time.monotonic()
+    hist = [t for t in _conn_hist.get(ip, []) if now - t < CONN_WINDOW]
+    hist.append(now)
+    _conn_hist[ip] = hist
+    return len(hist) <= CONN_MAX and _conc.get(ip, 0) < CONC_MAX
+
 
 def _client_ip(ws) -> str:
     """Real peer IP — via nginx X-Real-IP/X-Forwarded-For, else the socket."""
@@ -80,6 +98,24 @@ async def _broadcast(net, obj, exclude=None):
 
 
 async def handler(ws, *_):
+    ip = _client_ip(ws)
+    if not _allow_connection(ip):
+        try:
+            await ws.close(code=4003, reason="rate limited")
+        except Exception:
+            pass
+        return
+    _conc[ip] = _conc.get(ip, 0) + 1
+    try:
+        await _serve(ws, ip)
+    finally:
+        if _conc.get(ip, 0) <= 1:
+            _conc.pop(ip, None)
+        else:
+            _conc[ip] -= 1
+
+
+async def _serve(ws, ip):
     # -- challenge / join --
     nonce = secrets.token_bytes(32)
     await ws.send(json.dumps({"v": VERSION, "type": "challenge", "nonce": nonce.hex()}))
@@ -114,15 +150,21 @@ async def handler(ws, *_):
         except Exception:
             pass
     room[node_id] = ws
-    meta[(net, node_id)] = {"ip": _client_ip(ws), "since": time.time()}
+    meta[(net, node_id)] = {"ip": ip, "since": time.time()}
     _write_status()
     await ws.send(json.dumps({"type": "joined",
                               "peers": [p for p in room if p != node_id]}))
     await _broadcast(net, {"type": "peer-join", "id": node_id}, exclude=node_id)
 
     # -- relay loop --
+    msg_times: list = []
     try:
         async for raw in ws:
+            now = time.monotonic()
+            msg_times = [t for t in msg_times if now - t < MSG_WINDOW]
+            msg_times.append(now)
+            if len(msg_times) > MSG_MAX:
+                continue  # drop frames over the per-connection rate
             if isinstance(raw, bytes) or len(raw) > MAX_MSG:
                 continue
             try:
