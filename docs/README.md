@@ -15,6 +15,12 @@ carries user data.
 **If you are implementing a client or testing interop: start with 2.0.** It is
 locked and matches the deployed server. 2.1 is additive and opportunistic.
 
+## Extensions (optional, capability-gated, no wire break)
+
+| Doc | Applies to | Summary |
+|-----|-----------|---------|
+| [extensions/file-browse.md](extensions/file-browse.md) | `yaw/2.0`+ | WASTE-style **shared folder**: a peer shares a configured directory; others `browse` it and `get` files on demand. Additive app-layer messages (`browse`/`files`/`get`); 2.0 clients ignore them. |
+
 ## Proposals (YIPs — YAW Improvement Proposals)
 
 | Doc | Status | Summary |

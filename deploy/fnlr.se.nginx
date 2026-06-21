@@ -33,14 +33,11 @@ server {
         proxy_send_timeout 3600s;
     }
 
-    # Everything else -> the app: innocuous cover page at / and the hidden API.
+    # Everything else -> a static, innocuous cover page (no app server).
+    # yaw/2 needs only signaling + STUN; the YAW/1 Flask anchor is retired.
     location / {
-        proxy_pass http://127.0.0.1:8055;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        client_max_body_size 4m;
+        root /home/fnlr/cover;
+        index index.html;
     }
 
     listen [2a03:b0c0:0:1010::15:1]:443 ssl; # managed by Certbot

@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import secrets
+import time
 
 import websockets
 from nacl.signing import VerifyKey
@@ -24,9 +25,43 @@ VERSION = "yaw/2.0"
 MAX_MSG = 1 << 16            # 64 KiB cap on any signaling frame
 JOIN_TIMEOUT = 15           # seconds to authenticate after connecting
 _HEX = set("0123456789abcdef")
+STATUS_FILE = os.environ.get("SIG_STATUS",
+                             os.path.join(os.path.dirname(os.path.abspath(__file__)), "status.json"))
 
 # net (sha256 hex) -> { id (ed25519 pubkey hex) -> websocket }
 rooms: dict[str, dict[str, object]] = {}
+# (net, id) -> { "ip": str, "since": float }  — for the `yawpeers` admin tool
+meta: dict = {}
+
+
+def _client_ip(ws) -> str:
+    """Real peer IP — via nginx X-Real-IP/X-Forwarded-For, else the socket."""
+    try:
+        h = ws.request_headers
+        xri = h.get("X-Real-IP")
+        if xri:
+            return xri.strip()
+        xff = h.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+    except Exception:
+        pass
+    ra = getattr(ws, "remote_address", None)
+    return ra[0] if ra else "?"
+
+
+def _write_status():
+    """Atomically write a snapshot of current connections for the admin tool."""
+    try:
+        data = {"updated": time.time(),
+                "peers": [{"id": pid, "net": pnet, "ip": m["ip"], "since": m["since"]}
+                          for (pnet, pid), m in meta.items()]}
+        tmp = STATUS_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, STATUS_FILE)
+    except Exception:
+        pass
 
 
 def _valid_hex(s, n) -> bool:
@@ -79,6 +114,8 @@ async def handler(ws, *_):
         except Exception:
             pass
     room[node_id] = ws
+    meta[(net, node_id)] = {"ip": _client_ip(ws), "since": time.time()}
+    _write_status()
     await ws.send(json.dumps({"type": "joined",
                               "peers": [p for p in room if p != node_id]}))
     await _broadcast(net, {"type": "peer-join", "id": node_id}, exclude=node_id)
@@ -108,9 +145,11 @@ async def handler(ws, *_):
     finally:
         if rooms.get(net, {}).get(node_id) is ws:
             del rooms[net][node_id]
+            meta.pop((net, node_id), None)
             if not rooms[net]:
                 rooms.pop(net, None)
             await _broadcast(net, {"type": "peer-leave", "id": node_id})
+            _write_status()
 
 
 async def main():

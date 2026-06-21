@@ -4,6 +4,29 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-21 — The keyring decides who gets in
+On this day in 1788 New Hampshire became the ninth state to ratify the
+Constitution — the vote that finally made it binding, proof that a network springs
+to life only once enough parties agree to trust the same rules. And on this day in
+1948 the Manchester "Baby" ran the first stored program ever executed, fifty-odd
+minutes of arithmetic that opened the software age. We add rules of trust, and a
+folder to share:
+
+- **Keyring trust gate (YAW/2).** A session now forms only between peers who have
+  each accepted the other's id — friend-to-friend, both directions. Untrusted ids
+  are refused (with a one-time nudge so you can `/accept` them). Persistent identity
+  + keyring on disk (CLI: `~/.yaw/identity`, `~/.yaw/keyring`) and in localStorage
+  (web). The smaller id offers and re-offers only a *dead* link, so accepting a key
+  brings the connection up without tearing down healthy ones.
+- **WASTE-style folder sharing (YAW/2).** Share a configured directory; friends
+  `browse` it and `get` files on demand, path-traversal-safe and read-only.
+  Additive, capability-gated (`caps:["share"]`) — no change to the locked 2.0 wire.
+- Live-tested end to end over the production signaling + STUN: no trust → no link;
+  mutual accept → identity-verified session both ways; browse + SHA-256-verified
+  pull; a `../escape` attempt politely refused.
+- New on the server: a `yawpeers` CLI showing who is connected (id, real IP via the
+  proxy's `X-Real-IP`, connect time, uptime).
+
 ### 2026-06-20 — Project genesis
 On this day in 1837, a teenaged Victoria was woken before dawn to learn she was
 queen of a realm she'd hold for 63 years; on this day in 1819 the *SS Savannah*

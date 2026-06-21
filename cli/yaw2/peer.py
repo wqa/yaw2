@@ -12,12 +12,14 @@ import hashlib
 import json
 import os
 import re
+import time
 
 from aiortc import (RTCPeerConnection, RTCConfiguration, RTCIceServer,
                     RTCSessionDescription)
 
 from .identity import Identity
 from .signaling import Signaling
+from .fileshare import FileShare
 
 STUN = "stun:fnlr.se:3478"
 BIND_PREFIX = b"yaw/2 bind"
@@ -30,11 +32,13 @@ def _dtls_fp(sdp: str) -> bytes:
 
 
 class YawPeer:
-    def __init__(self, identity: Identity, signaling: Signaling, peer_id: str, on_event):
+    def __init__(self, identity: Identity, signaling: Signaling, peer_id: str, on_event,
+                 share=None):
         self.id = identity
         self.sig = signaling
         self.peer_id = peer_id
         self.on_event = on_event
+        self.share = share          # FileShare or None (we host a browsable folder)
         self.pc = RTCPeerConnection(RTCConfiguration([RTCIceServer(urls=STUN)]))
         self.dc = None
         self.verified = False
@@ -91,8 +95,9 @@ class YawPeer:
         if os.environ.get("YAW_DBG"):
             print(f"[dbg {self.id.id[:4]}] dc OPEN -> sending hello (offerer={self.id.id < self.peer_id})")
         bind = BIND_PREFIX + _dtls_fp(self.pc.localDescription.sdp) + _dtls_fp(self.pc.remoteDescription.sdp)
+        caps = ["share"] if self.share else []
         self.dc.send(json.dumps({"type": "hello", "id": self.id.id, "nick": "py",
-                                 "sig": self.id.sign(bind).hex()}))
+                                 "caps": caps, "sig": self.id.sign(bind).hex()}))
 
     async def _on_control(self, message):
         try:
@@ -108,9 +113,24 @@ class YawPeer:
             ok = (m.get("id") == self.peer_id and
                   Identity.verify(m["id"], bind, bytes.fromhex(m["sig"])))
             self.verified = ok
-            self.on_event("connected", peer=self.peer_id, verified=ok, nick=m.get("nick"))
+            self.peer_caps = m.get("caps", [])
+            self.on_event("connected", peer=self.peer_id, verified=ok,
+                          nick=m.get("nick"), caps=self.peer_caps)
         elif t == "chat":
             self.on_event("chat", peer=self.peer_id, text=m.get("text", ""))
+        elif t == "browse":
+            entries = self.share.listing() if self.share else []
+            self.dc.send(json.dumps({"type": "files", "entries": entries}))
+        elif t == "files":
+            self.on_event("files", peer=self.peer_id, entries=m.get("entries", []))
+        elif t == "get":
+            data = self.share.read(m.get("name", "")) if self.share else None
+            if data is None:
+                self.dc.send(json.dumps({"type": "no-file", "name": m.get("name", "")}))
+            else:
+                self.send_file(m["name"], data)
+        elif t == "no-file":
+            self.on_event("no-file", peer=self.peer_id, name=m.get("name", ""))
         elif t == "file-offer":
             self._recv[m["xid"]] = {"name": m["name"], "size": m["size"],
                                     "sha": m["sha256"], "buf": bytearray()}
@@ -128,6 +148,14 @@ class YawPeer:
     def send_chat(self, text: str):
         if self.dc:
             self.dc.send(json.dumps({"type": "chat", "text": text}))
+
+    def request_browse(self):
+        if self.dc:
+            self.dc.send(json.dumps({"type": "browse"}))
+
+    def request_get(self, name: str):
+        if self.dc:
+            self.dc.send(json.dumps({"type": "get", "name": name}))
 
     def send_file(self, name: str, data: bytes):
         xid = os.urandom(8).hex()
@@ -152,37 +180,97 @@ class YawPeer:
 
 
 class Node:
-    """One signaling connection + a peer per other member of the network."""
+    """One signaling connection + a peer per *trusted* member of the network.
 
-    def __init__(self, url: str, identity: Identity, net: str, on_event):
+    Trust gate (protocol §6): a session forms only with peers whose id is in our
+    keyring. The smaller id offers; the larger answers. An offerer periodically
+    re-offers trusted, present, not-yet-connected peers, so accepting a key at any
+    time (even mid-room) brings the link up without a restart. If `keyring` is None
+    the node trusts everyone (dev/test only).
+    """
+
+    RECONCILE = 4       # seconds between reconcile sweeps
+    RETRY_AFTER = 12    # re-offer a link that hasn't verified within this many seconds
+
+    def __init__(self, url: str, identity: Identity, net: str, on_event,
+                 share_dir=None, keyring=None):
         self.id = identity
         self.net = net
         self.on_event = on_event
         self.sig = Signaling(url, identity, net)
         self.peers: dict[str, YawPeer] = {}
+        self.share = FileShare(share_dir) if share_dir else None
+        self.keyring = keyring
+
+    def _trusted(self, pid: str) -> bool:
+        return self.keyring is None or self.keyring.trusts(pid)
 
     async def start(self):
         present = await self.sig.connect()
-        asyncio.ensure_future(self.sig.run(self._route_from, self._on_join, self._on_leave))
+        asyncio.ensure_future(self.sig.run(self._on_from, self._on_join, self._on_leave))
         for pid in present:
-            await self._ensure(pid)
+            await self._try_connect(pid)
+        asyncio.ensure_future(self._reconcile())
+
+    def _new_peer(self, pid: str) -> YawPeer:
+        old = self.peers.get(pid)
+        if old is not None:
+            try:
+                asyncio.ensure_future(old.pc.close())
+            except Exception:
+                pass
+        peer = YawPeer(self.id, self.sig, pid, self.on_event, share=self.share)
+        peer.created = time.monotonic()
+        self.peers[pid] = peer
+        return peer
+
+    async def _try_connect(self, pid: str):
+        """Offerer side: if we trust a present peer with no live session, offer."""
+        if pid == self.id.id:
+            return
+        if not self._trusted(pid):
+            self.on_event("untrusted", peer=pid)
+            return
+        if self.id.id >= pid:
+            return  # we are the answerer; we only answer offers
+        existing = self.peers.get(pid)
+        if existing is not None:
+            alive = existing.pc.connectionState not in ("failed", "closed")
+            fresh = time.monotonic() - getattr(existing, "created", 0) < self.RETRY_AFTER
+            if existing.verified or (alive and fresh):
+                return  # connected, or a young attempt still in flight — leave it
+        await self._new_peer(pid).start_offer()
 
     async def _on_join(self, pid, *_):
-        # NOTE: spike trusts any id in the network (TOFU). Real client gates on the keyring.
-        await self._ensure(pid)
-
-    async def _ensure(self, pid):
-        if pid in self.peers or pid == self.id.id:
-            return self.peers.get(pid)
-        peer = YawPeer(self.id, self.sig, pid, self.on_event)
-        self.peers[pid] = peer
-        if self.id.id < pid:        # smaller id offers
-            await peer.start_offer()
-        return peer
+        await self._try_connect(pid)
 
     async def _on_leave(self, pid):
         self.peers.pop(pid, None)
 
-    async def _route_from(self, frm, obj):
-        peer = await self._ensure(frm)
-        await peer.handle_signal(obj)
+    async def _on_from(self, frm, obj):
+        if not self._trusted(frm):
+            self.on_event("untrusted", peer=frm)
+            return
+        kind = obj.get("kind")
+        if kind == "offer":
+            existing = self.peers.get(frm)
+            peer = existing if (existing is not None and existing.verified) else self._new_peer(frm)
+            await peer.handle_signal(obj)
+        elif kind == "answer":
+            peer = self.peers.get(frm)
+            if peer is not None:
+                await peer.handle_signal(obj)
+
+    async def _reconcile(self):
+        while True:
+            await asyncio.sleep(self.RECONCILE)
+            for pid in list(self.sig.peers):
+                await self._try_connect(pid)
+
+    async def accept(self, node_id: str) -> bool:
+        """Trust an id; connect immediately if it's present."""
+        added = self.keyring.accept(node_id) if self.keyring else False
+        node_id = node_id.strip().lower()
+        if node_id in self.sig.peers:
+            await self._try_connect(node_id)
+        return added

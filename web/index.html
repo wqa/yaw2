@@ -42,12 +42,20 @@
     <input id="nick" value="web" placeholder="nick" />
     <button id="join" class="primary">Connect</button>
 
+    <h3>Trust</h3>
+    <div id="myid" class="mono" style="font-size:.68rem; word-break:break-all; cursor:pointer" title="click to copy your id"></div>
+    <input id="acceptid" placeholder="friend's id (64 hex)" />
+    <button id="accept">Accept key</button>
+    <div id="keys" class="muted" style="font-size:.72rem; margin-top:.4rem"></div>
+
     <h3>Peers <span id="pcount" class="muted"></span></h3>
     <div id="peers"></div>
 
-    <h3>Send a file</h3>
-    <input id="file" type="file" />
-    <button id="sendfile">Send to all peers</button>
+    <h3>Files</h3>
+    <input id="file" type="file" multiple />
+    <button id="addshare">Add to my share</button>
+    <button id="sendfile">Send now to all</button>
+    <div id="sharecount" class="muted" style="font-size:.78rem; margin-top:.3rem"></div>
   </aside>
 
   <main>
@@ -71,6 +79,13 @@
     const short = (id) => esc((id || '').slice(0, 12)) + '…';
 
     let node = null, ident = null;
+    const untrusted = new Set();
+
+    function refreshKeys() {
+      if (!node) return;
+      const ids = node.keyring.all();
+      $('keys').textContent = ids.length ? `trusting ${ids.length}: ` + ids.map(i => i.slice(0, 8) + '…').join(', ') : 'trusting nobody yet';
+    }
 
     function refreshPeers() {
       const peers = node ? Object.values(node.peers) : [];
@@ -79,14 +94,47 @@
       for (const p of peers) {
         const d = document.createElement('div'); d.className = 'peer mono';
         d.innerHTML = short(p.peerId) + (p.verified ? '<span class="badge ok">verified</span>' : '<span class="badge warn">…</span>');
+        if (p.verified) {
+          const b = document.createElement('button');
+          b.textContent = 'browse'; b.style.cssText = 'font-size:.7rem;margin-left:.4rem;padding:.05rem .4rem';
+          b.onclick = () => p.requestBrowse();
+          d.appendChild(b);
+        }
         $('peers').appendChild(d);
       }
     }
 
     function onEvent(kind, kw) {
       if (kind === 'connected') { line('sys', `+ ${short(kw.peer)} connected ${kw.verified ? '(identity verified ✓)' : '(UNVERIFIED!)'}`); refreshPeers(); }
+      else if (kind === 'untrusted') {
+        if (untrusted.has(kw.peer)) return; untrusted.add(kw.peer);
+        const d = document.createElement('div'); d.className = 'line sys';
+        d.innerHTML = `<b>${short(kw.peer)}</b> wants to connect — not in your keyring. `;
+        const b = document.createElement('button'); b.textContent = 'accept';
+        b.style.cssText = 'font-size:.7rem;padding:.05rem .4rem';
+        b.onclick = async () => {
+          try { await node.accept(kw.peer); untrusted.delete(kw.peer); refreshKeys(); line('sys', `accepted ${short(kw.peer)} — connecting…`); }
+          catch (e) { line('sys', 'error: ' + esc(e.message)); }
+        };
+        d.appendChild(b);
+        const c = document.createElement('div'); c.className = 'mono muted'; c.style.cssText = 'font-size:.6rem;word-break:break-all'; c.textContent = kw.peer;
+        d.appendChild(c); log.appendChild(d); log.scrollTop = log.scrollHeight;
+      }
       else if (kind === 'peer-leave') { line('sys', `- ${short(kw.peer)} left`); refreshPeers(); }
       else if (kind === 'chat') line('', `<b>${short(kw.peer)}</b>: ${esc(kw.text)}`);
+      else if (kind === 'files') {
+        if (!kw.entries.length) { line('sys', `${short(kw.peer)} shares nothing`); return; }
+        line('sys', `${short(kw.peer)} shares:`);
+        for (const e of kw.entries) {
+          const d = document.createElement('div'); d.className = 'line';
+          d.innerHTML = `&nbsp;&nbsp;${esc(e.name)} <span class="muted">${e.size} B</span> `;
+          const b = document.createElement('button');
+          b.textContent = 'get'; b.style.cssText = 'font-size:.7rem;padding:.05rem .4rem';
+          b.onclick = () => { const p = node.peers[kw.peer]; if (p) p.requestGet(e.name); };
+          d.appendChild(b); log.appendChild(d); log.scrollTop = log.scrollHeight;
+        }
+      }
+      else if (kind === 'no-file') line('sys', `${short(kw.peer)} has no “${esc(kw.name)}”`);
       else if (kind === 'file-incoming') line('sys', `incoming file “${esc(kw.name)}” (${kw.size} B) from ${short(kw.peer)}…`);
       else if (kind === 'file-recv') {
         if (!kw.ok) { line('sys', `file “${esc(kw.name)}” FAILED hash check`); return; }
@@ -101,8 +149,11 @@
         await YAW.ready();
         ident = YAW.Identity.load();
         $('me').textContent = 'you: ' + ident.short;
+        $('myid').textContent = ident.id;
+        $('myid').onclick = () => { navigator.clipboard?.writeText(ident.id); line('sys', 'your id copied to clipboard'); };
         const net = YAW.netHash($('net').value.trim());
         node = new YAW.Node($('url').value.trim(), ident, net, onEvent);
+        refreshKeys();
         line('sys', `joining network “${esc($('net').value.trim())}”…`);
         await node.start();
         line('sys', 'connected to signaling — waiting for peers (open this page elsewhere or run the CLI peer).');
@@ -118,10 +169,29 @@
       line('mine', `<b>you</b>: ${esc(t)}`);
     };
 
+    $('accept').onclick = async () => {
+      if (!node) { line('sys', 'connect first'); return; }
+      const id = $('acceptid').value.trim();
+      try { const added = await node.accept(id); $('acceptid').value = ''; refreshKeys();
+        line('sys', added ? `accepted ${short(id)} — will connect if present` : `${short(id)} already trusted`); }
+      catch (e) { line('sys', 'error: ' + esc(e.message)); }
+    };
+
+    $('addshare').onclick = () => {
+      if (!node || !$('file').files.length) return;
+      for (const f of $('file').files) node.shared.set(f.name, f);
+      $('sharecount').textContent = node.shared.size
+        ? `sharing ${node.shared.size} file(s) — peers can browse you`
+        : '';
+      line('sys', `added ${$('file').files.length} file(s) to your share`);
+    };
+
     $('sendfile').onclick = async () => {
-      const f = $('file').files[0]; if (!f || !node) return;
-      for (const p of Object.values(node.peers)) await p.sendFile(f);
-      line('file', `sending “${esc(f.name)}” (${f.size} B) to ${Object.keys(node.peers).length} peer(s)…`);
+      if (!node) return;
+      for (const f of $('file').files) {
+        for (const p of Object.values(node.peers)) await p.sendFile(f);
+        line('file', `sending “${esc(f.name)}” (${f.size} B) to ${Object.keys(node.peers).length} peer(s)…`);
+      }
     };
   </script>
 </body>

@@ -100,10 +100,11 @@ const YAW = (() => {
   }
 
   class Peer {
-    constructor(id, sig, peerId, on) {
+    constructor(id, sig, peerId, on, share) {
       this.id = id; this.sig = sig; this.peerId = peerId; this.on = on;
+      this.share = share || null;   // Map<name, File> we host (optional)
       this.pc = new RTCPeerConnection({ iceServers: [{ urls: STUN }] });
-      this.dc = null; this.verified = false;
+      this.dc = null; this.verified = false; this.caps = [];
       this._recv = {}; this._send = {};
       this.pc.ondatachannel = (ev) => this._wire(ev.channel);
     }
@@ -138,15 +139,28 @@ const YAW = (() => {
     }
     _sendHello() {
       const bind = concat(enc(BIND_PREFIX), dtlsFp(this.pc.localDescription.sdp), dtlsFp(this.pc.remoteDescription.sdp));
-      this.dc.send(JSON.stringify({ type: 'hello', id: this.id.id, nick: 'web', sig: S.to_hex(this.id.sign(bind)) }));
+      const caps = (this.share && this.share.size) ? ['share'] : [];
+      this.dc.send(JSON.stringify({ type: 'hello', id: this.id.id, nick: 'web', caps, sig: S.to_hex(this.id.sign(bind)) }));
     }
+    requestBrowse() { if (this.dc) this.dc.send(JSON.stringify({ type: 'browse' })); }
+    requestGet(name) { if (this.dc) this.dc.send(JSON.stringify({ type: 'get', name })); }
     _onControl(data) {
       const m = JSON.parse(data);
       if (m.type === 'hello') {
         const bind = concat(enc(BIND_PREFIX), dtlsFp(this.pc.remoteDescription.sdp), dtlsFp(this.pc.localDescription.sdp));
         this.verified = m.id === this.peerId && Identity.verify(m.id, bind, S.from_hex(m.sig));
-        this.on('connected', { peer: this.peerId, verified: this.verified, nick: m.nick });
+        this.caps = m.caps || [];
+        this.on('connected', { peer: this.peerId, verified: this.verified, nick: m.nick, caps: this.caps });
       } else if (m.type === 'chat') this.on('chat', { peer: this.peerId, text: m.text });
+      else if (m.type === 'browse') {
+        const entries = this.share ? [...this.share.entries()].map(([name, f]) => ({ name, size: f.size })) : [];
+        this.dc.send(JSON.stringify({ type: 'files', entries }));
+      } else if (m.type === 'files') this.on('files', { peer: this.peerId, entries: m.entries || [] });
+      else if (m.type === 'get') {
+        const f = this.share && this.share.get(m.name);
+        if (!f) this.dc.send(JSON.stringify({ type: 'no-file', name: m.name }));
+        else this.sendFile(f);
+      } else if (m.type === 'no-file') this.on('no-file', { peer: this.peerId, name: m.name });
       else if (m.type === 'file-offer') {
         this._recv[m.xid] = { name: m.name, size: m.size, sha: m.sha256, buf: [] };
         this.dc.send(JSON.stringify({ type: 'file-accept', xid: m.xid }));
@@ -183,28 +197,73 @@ const YAW = (() => {
     }
   }
 
+  class Keyring {
+    // Trusted peer ids, persisted in localStorage. Friend-to-friend (spec §6).
+    constructor() { this.ids = new Set(JSON.parse(localStorage.getItem('yaw2_keyring') || '[]')); }
+    trusts(id) { return this.ids.has((id || '').toLowerCase()); }
+    accept(id) {
+      id = (id || '').trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('not a valid id (need 64 hex chars)');
+      const had = this.ids.has(id); this.ids.add(id); this._save(); return !had;
+    }
+    remove(id) { id = (id || '').trim().toLowerCase(); const had = this.ids.delete(id); this._save(); return had; }
+    all() { return [...this.ids].sort(); }
+    _save() { localStorage.setItem('yaw2_keyring', JSON.stringify([...this.ids])); }
+  }
+
   class Node {
     constructor(url, identity, net, on) {
       this.id = identity; this.net = net; this.on = on;
       this.sig = new Signaling(url, identity, net); this.peers = {};
+      this.shared = new Map();        // name -> File, the folder this tab hosts
+      this.keyring = new Keyring();
+      this.present = new Set();        // ids currently in the network
     }
+    _trusted(pid) { return this.keyring.trusts(pid); }
     async start() {
       const present = await this.sig.connect(
-        (frm, obj) => this._route(frm, obj),
-        (pid) => this._ensure(pid),
-        (pid) => { delete this.peers[pid]; this.on('peer-leave', { peer: pid }); });
-      for (const pid of present) await this._ensure(pid);
+        (frm, obj) => this._onFrom(frm, obj),
+        (pid) => { this.present.add(pid); this._tryConnect(pid); },
+        (pid) => { this.present.delete(pid); delete this.peers[pid]; this.on('peer-leave', { peer: pid }); });
+      for (const pid of present) { this.present.add(pid); await this._tryConnect(pid); }
+      setInterval(() => { for (const pid of this.present) this._tryConnect(pid); }, 4000);
     }
-    async _ensure(pid) {
-      if (this.peers[pid] || pid === this.id.id) return this.peers[pid];
-      // SPIKE: trust any id in the network (TOFU). Real client gates on a keyring.
-      const p = new Peer(this.id, this.sig, pid, this.on);
-      this.peers[pid] = p;
-      if (this.id.id < pid) await p.startOffer();
-      return p;
+    _newPeer(pid) {
+      const old = this.peers[pid];
+      if (old) { try { old.pc.close(); } catch (e) {} }
+      const p = new Peer(this.id, this.sig, pid, this.on, this.shared);
+      p.created = Date.now();
+      this.peers[pid] = p; return p;
     }
-    async _route(frm, obj) { const p = await this._ensure(frm); await p.handleSignal(obj); }
+    async _tryConnect(pid) {           // offerer side
+      if (pid === this.id.id) return;
+      if (!this._trusted(pid)) { this.on('untrusted', { peer: pid }); return; }
+      if (this.id.id >= pid) return;   // we answer; we don't offer
+      const e = this.peers[pid];
+      if (e) {
+        const alive = e.pc.connectionState !== 'failed' && e.pc.connectionState !== 'closed';
+        const fresh = Date.now() - (e.created || 0) < 12000;   // RETRY_AFTER
+        if (e.verified || (alive && fresh)) return;
+      }
+      await this._newPeer(pid).startOffer();
+    }
+    async _onFrom(frm, obj) {
+      if (!this._trusted(frm)) { this.on('untrusted', { peer: frm }); return; }
+      if (obj.kind === 'offer') {
+        const e = this.peers[frm];
+        await ((e && e.verified) ? e : this._newPeer(frm)).handleSignal(obj);
+      } else if (obj.kind === 'answer') {
+        const p = this.peers[frm]; if (p) await p.handleSignal(obj);
+      }
+    }
+    async accept(id) {
+      const added = this.keyring.accept(id);
+      id = id.trim().toLowerCase();
+      if (this.present.has(id)) await this._tryConnect(id);
+      return added;
+    }
+    forget(id) { return this.keyring.remove(id); }
   }
 
-  return { ready, netHash, Identity, Node };
+  return { ready, netHash, Identity, Keyring, Node };
 })();
