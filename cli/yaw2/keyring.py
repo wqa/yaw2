@@ -109,6 +109,23 @@ class Keyring:
     def entries(self):
         return sorted(self.names.items())
 
+    # -- portable contacts (ids + local nicknames; not secret) -----------------
+    def export_contacts(self) -> dict:
+        return {"yaw": "yaw-contacts-1",
+                "contacts": [{"id": i, "nick": n} for i, n in self.entries()]}
+
+    def import_contacts(self, data: dict) -> int:
+        if not isinstance(data, dict) or data.get("yaw") != "yaw-contacts-1":
+            raise ValueError("not a yaw contacts file")
+        n = 0
+        for c in data.get("contacts", []):
+            cid = (c.get("id") or "").strip().lower()
+            if valid_id(cid):
+                self.names[cid] = clean_nick(c.get("nick", "")) or self.names.get(cid, "")
+                n += 1
+        self._save()
+        return n
+
     def _save(self):
         if not self.path:
             return
@@ -130,4 +147,6 @@ if __name__ == "__main__":
     kr = Keyring()
     assert kr.accept(fid, "Felix") and not kr.accept(fid)         # add, then dup
     assert kr.name(fid) == "Felix" and kr.rename(fid, "Felix N.")
-    print("[keyring] contact-card + nickname round-trip OK ✓")
+    kr2 = Keyring()
+    assert kr2.import_contacts(kr.export_contacts()) == 1 and kr2.name(fid) == "Felix N."
+    print("[keyring] contact-card + nickname + contacts round-trip OK ✓")

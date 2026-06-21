@@ -51,6 +51,11 @@
     <input id="acceptnick" placeholder="nickname for them (optional)" />
     <button id="accept">Accept</button>
     <div id="keys" class="muted" style="font-size:.72rem; margin-top:.4rem"></div>
+    <div style="margin-top:.4rem">
+      <button id="expcontacts">Export contacts</button>
+      <button id="impcontacts">Import contacts</button>
+      <input id="contactsfile" type="file" accept=".yawcontacts,.json,application/json" style="display:none" />
+    </div>
     <div style="margin-top:.5rem">
       <button id="backupkey">Back up key</button>
       <button id="restorekey">Restore key</button>
@@ -234,6 +239,24 @@
       if (node) node.setNick(v); else localStorage.setItem('yaw2_nick', YAW.cleanNick(v));
       refreshMe();
       line('sys', 'nickname set: ' + (myNick() || '(none)'));
+    };
+
+    $('expcontacts').onclick = () => {
+      if (!node) { line('sys', 'connect first'); return; }
+      const data = node.keyring.exportContacts();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      a.download = 'yaw-contacts.yawcontacts';
+      a.click();
+      line('sys', `exported ${data.contacts.length} contact(s)`);
+    };
+    $('impcontacts').onclick = () => $('contactsfile').click();
+    $('contactsfile').onchange = async () => {
+      const f = $('contactsfile').files[0]; if (!f || !node) return;
+      try { const n = node.keyring.importContacts(JSON.parse(await f.text())); refreshKeys();
+        line('sys', `imported ${n} contact(s) — present ones will connect shortly`); }
+      catch (e) { line('sys', 'import failed: ' + esc(e.message)); }
+      $('contactsfile').value = '';
     };
 
     $('backupkey').onclick = () => {

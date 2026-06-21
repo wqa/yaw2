@@ -157,6 +157,8 @@ async def main():
                   "  /name <id-prefix> <nick>  (re)label a trusted contact\n"
                   "  /keys                     list trusted contacts + nicknames\n"
                   "  /forget <id>              remove a trusted id\n"
+                  "  /contacts export <file>   save contacts (ids + nicknames)\n"
+                  "  /contacts import <file>   merge contacts from a file\n"
                   "  /export <file>            write a passphrase-encrypted key backup\n"
                   "  /import <file>            restore identity from a key backup (then restart)\n"
                   "  /peers                    list connected peers\n"
@@ -195,6 +197,16 @@ async def main():
                 print(f"    {nid}  {nk or '(no nick)'}")
         elif cmd == "/forget" and len(parts) >= 2:
             print("  removed" if kr.remove(parts[1]) else "  not in keyring")
+        elif cmd == "/contacts" and len(parts) >= 3 and parts[1] == "export":
+            with open(parts[2], "w") as fh:
+                json.dump(kr.export_contacts(), fh, indent=2)
+            print(f"  wrote {len(kr.all())} contact(s) to {parts[2]}")
+        elif cmd == "/contacts" and len(parts) >= 3 and parts[1] == "import":
+            try:
+                n = kr.import_contacts(json.load(open(parts[2])))
+                print(f"  imported {n} contact(s) — present ones connect within a few seconds")
+            except Exception as e:
+                print(f"  import failed: {e}")
         elif cmd == "/export" and len(parts) >= 2:
             pw = await loop.run_in_executor(None, getpass.getpass, "  passphrase: ")
             if pw:

@@ -287,6 +287,16 @@ const YAW = (() => {
     remove(id) { id = (id || '').toLowerCase(); const had = delete this.names[id]; this._save(); return had; }
     all() { return Object.keys(this.names).sort(); }
     entries() { return Object.entries(this.names).sort((a, b) => (a[0] < b[0] ? -1 : 1)); }
+    exportContacts() { return { yaw: 'yaw-contacts-1', contacts: this.entries().map(([id, nick]) => ({ id, nick })) }; }
+    importContacts(data) {
+      if (!data || data.yaw !== 'yaw-contacts-1') throw new Error('not a yaw contacts file');
+      let n = 0;
+      for (const c of (data.contacts || [])) {
+        const id = (c.id || '').toLowerCase();
+        if (/^[0-9a-f]{64}$/.test(id)) { this.names[id] = cleanNick(c.nick || '') || this.names[id] || ''; n++; }
+      }
+      this._save(); return n;
+    }
     _save() { localStorage.setItem('yaw2_keyring', JSON.stringify(this.names)); }
   }
 
