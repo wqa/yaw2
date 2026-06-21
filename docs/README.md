@@ -58,7 +58,8 @@ new id. Clients keep the key locally (browser `localStorage`, CLI `~/.yaw/identi
 which is **not a backup** — clearing browser data or losing the device loses it.
 Export a **passphrase-encrypted key backup** (`*.yawkey`) and store it safely; the
 same file restores your identity in the web client *and* the CLI (one format, verified
-byte-identical across libsodium.js and PyNaCl).
+byte-identical across libsodium.js and PyNaCl). Full how-to:
+[KEYHANDLING.md](../KEYHANDLING.md).
 
 ### Contact card (`yaw-contact-1`)
 
