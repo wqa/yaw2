@@ -3,11 +3,13 @@
 **Version:** `yaw/2.1` · **Status:** 📝 **DRAFT** (proposed) · motivated by
 [YIP-0001](proposals/yip-0001-forward-secret-signaling.md).
 
-> **Reference implementation:** the Python CLI (`cli/`) implements this spec —
-> opportunistic, with a `require_fs` cutover switch — and is verified live
-> (`cli/test_fs_live.py`: 2.1↔2.1 forward-secret, 2.1↔2.0 fallback, require-FS
-> refusing a 2.0 peer). The web/desktop rollout is pending review; the deployed
-> server is untouched (2.1 is purely client-side, §5.4').
+> **Implemented & deployed across all reference clients** — Python CLI (`cli/`),
+> web (`web/`), and the Tauri desktop app — opportunistic, with a `require_fs`
+> cutover switch. The CLI is verified live (`cli/test_fs_live.py`: 2.1↔2.1
+> forward-secret, 2.1↔2.0 fallback, require-FS refusing a 2.0 peer), and the web's
+> ekey signature + ephemeral box are verified **byte-identical to the CLI** across
+> libsodium.js and PyNaCl. The deployed **server is untouched** — 2.1 is purely
+> client-side (§5.4'), so the anchor just relays the opaque boxes as before.
 
 > **2.1 = [2.0](yaw2.0-protocol.md) + forward-secret signaling.** This document is a
 > **delta**: everything in [yaw2.0-protocol.md](yaw2.0-protocol.md) still applies

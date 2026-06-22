@@ -4,6 +4,24 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-22 — Forward secrecy, everywhere
+On this day in 1633 the Inquisition made Galileo recant heliocentrism on paper — yet
+the planets kept their orbits no matter what anyone could later be compelled to say.
+`yaw/2.1` brings that stubbornness to the wire: compel or leak a long-term key
+tomorrow, and yesterday's recorded handshake stays unreadable.
+
+- **`yaw/2.1` forward-secret signaling is now live on every client** — CLI, web, and
+  the desktop app. Per-session ephemeral X25519 keys seal offer/answer and are
+  discarded when the session ends, closing the harvest-now-decrypt-later window.
+- **Opportunistic & backward-compatible** — a 2.1 client falls back to 2.0 with any
+  peer still on the old page, so the swoop broke no one mid-conversation; a
+  `require_fs` switch waits for the eventual hard cutover.
+- The web client's `ekey` signature and ephemeral box were verified **byte-identical
+  to the CLI** (libsodium.js ↔ PyNaCl, both directions) before going live. The
+  **anchor was not touched** — 2.1 is purely client-side; the server still only relays
+  opaque sealed boxes.
+- Connections now show **🔒 forward-secret** when both ends are 2.1.
+
 ### 2026-06-22 — A window of its own
 On this day in 1978 astronomers spotted Charon — Pluto finally had a steady companion
 sharing its sky. YAW got one too: a desktop client that's the same identity as the rest.

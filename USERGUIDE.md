@@ -74,9 +74,10 @@ manager or encrypted drive).
 ## What stays private
 
 The server only introduces peers. Your messages and files travel **directly and
-encrypted** between you and your friend. Nicknames are just labels you choose locally —
-the thing that actually proves identity is the card's address and the encrypted
-handshake, never the name.
+encrypted** between you and your friend, and the connection is **forward-secret** — even
+if someone later got hold of your key, they couldn't decrypt a conversation they'd
+recorded earlier. Nicknames are just labels you choose locally — the thing that actually
+proves identity is the card's address and the encrypted handshake, never the name.
 
 ---
 

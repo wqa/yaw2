@@ -81,11 +81,13 @@ contact cards + `*.yawkey` key backups.
 - **Resilience** — signaling **auto-reconnects** (media survives the blip), the
   server is **rate-limited**, peers show **connection status**, and a **self-diagnostic**
   (`cli/diagnose.py` / "Test my connectivity") answers "can others reach me?".
-- **Forward secrecy** — `yaw/2.1` (ephemeral-key signaling, YIP-0001) is implemented
-  in the **CLI**, opportunistic with a 2.0 fallback and a `require_fs` cutover switch.
+- **Forward secrecy** — `yaw/2.1` (ephemeral-key signaling, YIP-0001) is **deployed
+  across all clients** (CLI, web, desktop): per-session ephemeral keys, opportunistic
+  with a 2.0 fallback and a `require_fs` cutover switch. Crypto verified byte-identical
+  across libsodium.js and PyNaCl.
 
-**Next:** mirror `yaw/2.1` to the web client + deploy (security review), a real
-cross-NAT test on separate networks, and Tauri distribution (signing/notarization).
+**Next:** a real cross-NAT test on separate networks, and Tauri distribution
+(signing/notarization).
 
 ## For users
 
@@ -138,7 +140,7 @@ identity-bind byte order, the DataChannel open-race).
 - **Signaling** is sealed end-to-end; the server can't read SDP, candidate IPs, or
   content — only presence/timing within a hashed network. In `2.0` the sealing keys
   are static (not forward-secret); **`2.1` fixes this with per-session ephemeral keys
-  — implemented in the CLI (opportunistic, falls back to 2.0), web rollout pending.**
+  — deployed across all clients (opportunistic, falls back to 2.0 with older peers).**
   See [`docs/yaw2.1-protocol.md`](docs/yaw2.1-protocol.md) and
   [YIP-0001](docs/proposals/yip-0001-forward-secret-signaling.md).
 - **Trust** is the keyring; verify a contact's short id out of band before accepting.

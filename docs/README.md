@@ -10,11 +10,12 @@ carries user data.
 | Doc | Version | Status | What it is |
 |-----|---------|--------|------------|
 | [yaw2.0-protocol.md](yaw2.0-protocol.md) | `yaw/2.0` | 🔒 **LOCKED** | The frozen interop baseline. Implement against this exact wire + the live server. Do not change it. |
-| [yaw2.1-protocol.md](yaw2.1-protocol.md) | `yaw/2.1` | 📝 Draft · **CLI reference impl** | A **delta** over 2.0 adding forward-secret signaling. Backward-compatible (2.1 peers fall back to 2.0). Implemented in the Python CLI (opportunistic, with a `require_fs` cutover); web rollout pending review. |
+| [yaw2.1-protocol.md](yaw2.1-protocol.md) | `yaw/2.1` | 📝 Draft · **deployed (all clients)** | A **delta** over 2.0 adding forward-secret signaling. Backward-compatible (2.1 peers fall back to 2.0). Implemented + deployed in the CLI, web, and desktop clients (opportunistic, with a `require_fs` cutover). |
 
 **If you are implementing a client or testing interop: start with 2.0.** It is
-locked and matches the deployed server. 2.1 is additive and opportunistic — a 2.1
-client interoperates with 2.0 peers automatically.
+locked and matches the deployed server (which relays opaque boxes either way). 2.1 is
+additive and **purely client-side** — a 2.1 client interoperates with 2.0 peers
+automatically, and the anchor needs no change.
 
 ## Extensions (optional, capability-gated, no wire break)
 
