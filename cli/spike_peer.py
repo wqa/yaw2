@@ -60,19 +60,24 @@ def load_identity() -> Identity:
 
 def parse_args(argv):
     netname, share, nick = None, os.path.join(HOME, "share"), None
+    fs, require_fs = True, False
     it = iter(argv)
     for a in it:
         if a == "--share":
             share = next(it, share)
         elif a == "--nick":
             nick = next(it, None)
+        elif a == "--no-fs":          # behave as a 2.0 peer (no forward secrecy)
+            fs = False
+        elif a == "--require-fs":     # the cutover: refuse non-forward-secret (2.0) peers
+            require_fs = True
         elif not a.startswith("-"):
             netname = a
-    return netname, share, nick
+    return netname, share, nick, fs, require_fs
 
 
 async def main():
-    netname, share_dir, nick_arg = parse_args(sys.argv[1:])
+    netname, share_dir, nick_arg, fs, require_fs = parse_args(sys.argv[1:])
     netname = netname or default_net() or "spike-room"
     os.makedirs(share_dir, exist_ok=True)
     os.makedirs(DOWNLOADS, exist_ok=True)
@@ -99,6 +104,11 @@ async def main():
             fs = "forward-secret" if kw.get("fs") else "not forward-secret (2.0 peer)"
             print(f"[+] {label(kw['peer'])} connected  verified={kw['verified']}  [{fs}]"
                   f"{'  (shares files)' if shares else ''}{hint}")
+        elif kind == "fs-refused":
+            if ("fs", kw["peer"]) not in warned:
+                warned.add(("fs", kw["peer"]))
+                print(f"[fs] refused {label(kw['peer'])}: not forward-secret (2.0 peer) "
+                      f"and you required FS.")
         elif kind == "untrusted":
             if kw["peer"] not in warned:           # one nudge per id
                 warned.add(kw["peer"])
@@ -132,7 +142,8 @@ async def main():
     print(f"[cli peer] your card: {make_card(ident.id, my_nick)}")
     print(f"[cli peer] net '{netname}'  sharing {share_dir}  trusting {len(kr.all())} contact(s)")
     node = Node(SIGNAL_URL, ident, net_hash(netname), on_event,
-                share_dir=share_dir, keyring=kr, nick=my_nick)
+                share_dir=share_dir, keyring=kr, nick=my_nick,
+                forward_secret=fs, require_fs=require_fs)
     await node.start()
     print("[cli peer] connected — share /me with friends, /accept their card. /help for more.")
 
