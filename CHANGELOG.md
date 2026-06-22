@@ -4,6 +4,26 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-22 — Trust the sealed letter, not the wax under a different lamp
+On this day in 1865 news of a months-old proclamation finally reached Galveston — the
+truth had been authenticated all along; only the *delivery* lagged. Here too: a peer's
+identity was provably authenticated by the sealed signaling the entire time, while we
+kept squinting at a fingerprint under the wrong lamp and declaring it a stranger.
+
+- **Fixed (properly): cross-stack peers stuck "UNVERIFIED: signature mismatch".** The
+  prior fix (algorithm-agnostic fingerprint parsing) wasn't enough — the deeper problem is
+  that two WebRTC stacks advertise the **same** certificate under **different** hash
+  algorithms (a macOS WebView signs its cert fingerprint as `sha-512`, the Python stack as
+  `sha-256`), so each end derives different hex for the same cert and the signed bind can
+  never match. Identity verification no longer depends on fingerprint text at all. It now
+  rests on the **authenticated signaling**: the offer/answer arrive in a sealed box only
+  the peer's identity could produce (signed ephemeral key in 2.1, or a static box keyed to
+  the identity in 2.0), and WebRTC already enforces the channel certificate against the
+  fingerprint inside that authenticated SDP. So `verified` = an authenticated box was
+  opened from the expected id **and** the `hello` id matches. Stack-independent, and
+  strictly stronger against a malicious rendezvous server (it can't read or alter the
+  sealed SDP). Web + CLI; spec §9 rewritten; `python↔python` still verifies end-to-end.
+
 ### 2026-06-22 — The handshake that wouldn't take, and the storm it summoned
 On this day in 1948 the Empire Windrush docked at Tilbury and a great many people who
 *were* who they said they were spent years being treated as if unverified. On this day

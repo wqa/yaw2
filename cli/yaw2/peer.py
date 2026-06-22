@@ -50,6 +50,7 @@ class YawPeer:
         self.pc = RTCPeerConnection(RTCConfiguration([RTCIceServer(urls=STUN)]))
         self.dc = None
         self.verified = False
+        self.peer_authed = False    # we've opened an authenticated sealed box from peer_id
         self._recv = {}   # xid -> {name,size,sha,buf}
         self._send = {}   # xid -> bytes
 
@@ -159,6 +160,11 @@ class YawPeer:
         plain, used_eph = self._open(box)
         if plain is None:
             return
+        # A box that opens is authenticated to peer_id: ephemeral keys are bound to the
+        # identity by the signed `ekey`; the static box uses peer_id's own key. So once we
+        # open any box, the peer's identity is proven — and the (authenticated) offer/answer
+        # carries the DTLS fingerprint that WebRTC enforces, binding identity to the channel.
+        self.peer_authed = True
         try:
             obj = json.loads(plain)
         except Exception:
@@ -229,10 +235,15 @@ class YawPeer:
         if os.environ.get("YAW_DBG"):
             print(f"[dbg {self.id.id[:4]}] got control {t}")
         if t == "hello":
-            # verifier reconstructs the sender's bind: prefix || remote_fp || local_fp
-            bind = BIND_PREFIX + _dtls_fp(self.pc.remoteDescription.sdp) + _dtls_fp(self.pc.localDescription.sdp)
-            ok = (m.get("id") == self.peer_id and
-                  Identity.verify(m["id"], bind, bytes.fromhex(m["sig"])))
+            # Identity is bound to this channel by the *authenticated signaling*: the
+            # offer/answer that set up this DTLS session arrived in a sealed box that only
+            # peer_id could have produced (ephemeral key signed by the identity, or static
+            # box to/from the identity), and WebRTC enforces the channel's cert against the
+            # fingerprint inside that authenticated SDP. So verification = the box opened
+            # (peer_authed) and the hello's claimed id matches. The DTLS-fingerprint text
+            # is NOT used: stacks advertise a peer's cert under different hashes (WebKit
+            # sha-512 vs aiortc sha-256), so the hex never matches cross-stack.
+            ok = (m.get("id") == self.peer_id and self.peer_authed)
             self.verified = ok
             self.peer_caps = m.get("caps", [])
             self.on_event("connected", peer=self.peer_id, verified=ok,

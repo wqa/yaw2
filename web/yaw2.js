@@ -214,6 +214,7 @@ const YAW = (() => {
       this.nick = nick || '';       // our self-asserted display nick (informational)
       this.pc = new RTCPeerConnection({ iceServers: [{ urls: STUN }] });
       this.dc = null; this.verified = false; this.caps = [];
+      this.peerAuthed = false;      // opened an authenticated sealed box from peerId
       this._recv = {}; this._send = {};
       this.pc.ondatachannel = (ev) => this._wire(ev.channel);
       this.pc.onconnectionstatechange = () => this.on('status', { peer: this.peerId, state: this.pc.connectionState });
@@ -290,6 +291,10 @@ const YAW = (() => {
     async onBox(box) {                            // open one relayed box and dispatch
       const [plain, usedEph] = this._open(box);
       if (!plain) return;
+      // opened => authenticated to peerId (ephemeral key signed by the identity, or static
+      // box keyed to the identity). The authenticated offer/answer carries the DTLS
+      // fingerprint WebRTC enforces, so identity is bound to this channel via signaling.
+      this.peerAuthed = true;
       let obj; try { obj = JSON.parse(S.to_string(plain)); } catch (e) { return; }
       if (obj.kind === 'ekey') {
         await this._onEkey(obj);
@@ -348,17 +353,18 @@ const YAW = (() => {
     _onControl(data) {
       const m = JSON.parse(data);
       if (m.type === 'hello') {
-        const rfp = dtlsFp(this.pc.remoteDescription && this.pc.remoteDescription.sdp);
-        const lfp = dtlsFp(this.pc.localDescription && this.pc.localDescription.sdp);
-        const bind = concat(enc(BIND_PREFIX), rfp, lfp);
+        // Identity is bound to this channel by the authenticated signaling: the offer/answer
+        // arrived in a sealed box only peerId could produce (signed ephemeral key, or static
+        // box keyed to the identity), and WebRTC enforces the channel cert against the
+        // fingerprint inside that authenticated SDP. So verified = box opened (peerAuthed) and
+        // hello id matches. The DTLS-fingerprint text is NOT used — stacks report a peer's cert
+        // under different hashes (WebKit sha-512 vs aiortc sha-256), so it never matches cross-stack.
         let reason = '';
         if (m.id !== this.peerId) reason = 'id mismatch';
-        else if (!rfp.length || !lfp.length) reason = 'missing DTLS fingerprint';
-        else if (!Identity.verify(m.id, bind, S.from_hex(m.sig))) reason = 'signature mismatch';
+        else if (!this.peerAuthed) reason = 'unauthenticated signaling';
         this.verified = !reason;
         this.verifyReason = reason;
-        if (reason) try { console.warn('[yaw] hello unverified:', reason,
-          { rfpLen: rfp.length, lfpLen: lfp.length, idMatch: m.id === this.peerId }); } catch (e) {}
+        if (reason) try { console.warn('[yaw] hello unverified:', reason); } catch (e) {}
         this.caps = m.caps || [];
         this.on('connected', { peer: this.peerId, verified: this.verified, reason, nick: m.nick, caps: this.caps, fs: this.sessionFs });
       } else if (m.type === 'chat') this.on('chat', { peer: this.peerId, text: m.text });

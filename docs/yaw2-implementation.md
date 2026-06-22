@@ -289,47 +289,41 @@ event.
 
 ---
 
-## 9. Identity binding — the signed `hello`
+## 9. Identity binding — authenticated signaling + `hello`
 
-WebRTC authenticates the *channel* (DTLS), not the *identity*. A browser can't pin the
-DTLS cert to the Ed25519 key, so YAW binds them at the application layer: as soon as
-the `yaw` channel opens, each side sends a `hello` signing **both DTLS fingerprints**.
+The Ed25519 identity is bound to the DTLS channel by the **authenticated signaling**,
+not by anything in the channel itself:
+
+- Every `offer`/`answer`/`ekey` is delivered in a **sealed box** (§7–§8). Opening one
+  proves it came from the expected identity: in `yaw/2.1` the ephemeral key is signed by
+  the identity in the `ekey`; in `yaw/2.0` the static box is keyed to the identity. A box
+  that doesn't authenticate fails the Poly1305 tag and is dropped.
+- That authenticated `offer`/`answer` carries the DTLS `a=fingerprint`, and **WebRTC
+  enforces the channel's certificate against it**. So the chain is: authenticated sender →
+  authenticated SDP → authenticated DTLS certificate → *this channel is the peer's*.
+
+A peer is therefore **verified** once both hold: (a) at least one authenticated box has
+been opened from the expected id — always true, since the `offer`/`answer` is what set up
+the channel — and (b) the `hello` it sends over the channel carries the matching `id`.
 
 ```json
-{ "type": "hello", "id": "8a88…6f5c", "nick": "magnus", "caps": ["share"], "sig": "fa51…d904" }
+{ "type": "hello", "id": "8a88…6f5c", "nick": "magnus", "caps": ["share"] }
 ```
 
-```
-bind = utf8("yaw/2 bind") || local_fp(32) || remote_fp(32)
-sig  = Ed25519_sign(bind, signing key)
-```
+The `hello` conveys the self-asserted `id`, an optional display `nick`, and `caps`
+(capabilities, e.g. `"share"`, §12). An implementation MUST treat the session as
+**unauthenticated** if `hello.id` ≠ the expected peer id, or if it has not opened an
+authenticated box from that id.
 
-- `local_fp` = **your** DTLS fingerprint; `remote_fp` = the **peer's**. Each side signs
-  `prefix || own_fp || peer_fp`. The **verifier** reconstructs `prefix || sender_fp ||
-  own_fp` (i.e. swaps the two, since the sender's `local` is the verifier's `remote`)
-  and checks it against the sender's id.
-- The **DTLS fingerprint** is the value of the SDP line
-  `a=fingerprint:<algo> F8:BF:28:…` — strip colons, lowercase, hex-decode to bytes.
-  Match the line **algorithm-agnostically** (`sha-256` is typical, but a stack MAY
-  advertise its cert under `sha-512` or another hash): there is exactly one fingerprint
-  line per description, so both peers extract the same value regardless of the hash. An
-  implementation MUST NOT hard-match `sha-256` only — doing so yields an empty local
-  fingerprint against such a stack and the bind can then never verify.
-- A peer MUST treat a session whose `hello` fails verification, or whose `id` ≠ the
-  expected peer id, as **unauthenticated** (don't display it as verified).
-- `nick` (optional, §10) is a display label; `caps` (optional) advertises capabilities
-  (e.g. `"share"`, §12).
-
-**Test vector** (signer id A; example 32-byte fingerprints):
-
-```
-BIND_PREFIX        "yaw/2 bind"  (10 bytes)
-local fp           f8bf28cbaf432cf859f350667d228387dbf965f6230df002c7979c98c2891673
-remote fp          c90a985afb96d4085ab5fec69fa7a3dcd0de74792b3cf2c532c038e8676099a2
-bind (hex)         7961772f322062696e64 f8bf…1673 c90a…99a2
-hello sig          fa5185a99142fa22251e2788e314d2c44a0b5eb7b2a3723918d10fa9a9fb0e19
-                   6b211057f97f3639cc40b00d2defc7dae01c09f8878b7a80e1d1c4420b8ad904
-```
+> **Why not sign the DTLS fingerprint?** Earlier drafts had each side sign
+> `prefix || own_fp || peer_fp` (fingerprints lifted from the SDP) inside the `hello`.
+> That breaks across heterogeneous WebRTC stacks: a certificate is advertised under
+> whatever hash the stack picked (WebKit `sha-512`, aiortc `sha-256`, …), so the two ends
+> derive **different hex for the same cert** and the signature never matches — a permanent
+> "signature mismatch", channel up but never verified. The authenticated-signaling binding
+> above is stack-independent and strictly stronger against a malicious rendezvous server,
+> which can neither read nor alter the sealed SDP. (Some builds still *send* a legacy
+> fingerprint `sig` in `hello` for backward compatibility; it is not the verification gate.)
 
 ---
 
