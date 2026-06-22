@@ -1,64 +1,59 @@
-# YAW anchor — deployment (<anchor-host>)
+# YAW/2 — deployment (`<anchor-host>`)
 
-The rendezvous anchor runs on **<server-host>** (host `survey.<server-host>`, Ubuntu, Python
-3.8) as the `fnlr` user, behind nginx with the existing Let's Encrypt cert that
-already covers `<anchor-host>`. The public site shows only an innocuous cover page; the
-directory API and the client download live under unguessable paths.
+The anchor is a **signaling + STUN** rendezvous only — it never carries mesh data
+(chat/files are peer-to-peer over WebRTC). It runs on **`<server-host>`** (Ubuntu,
+Python 3.8) as the `fnlr` user, behind nginx with the existing Let's Encrypt cert that
+covers `<anchor-host>`. The public site shows only an innocuous cover page; everything
+else lives under unguessable paths behind basic auth.
 
-## Live URLs
+> Secrets (host, secret path segments, basic-auth) are **not in this repo** — see the
+> placeholders below and **[ROTATING_KEYS.md](../ROTATING_KEYS.md)** for where the real
+> values live and how to rotate them.
 
-| What | URL |
-|------|-----|
-| Public cover page | `https://<anchor-host>/` |
-| **Client anchor URL** (baked into the client) | `https://<anchor-host>/<anchor-path>` |
-| Operator status page | `https://<anchor-host>/<anchor-path>/status` |
-| **Secret download link** | `https://<anchor-host>/<download-path>/` |
+## Services
 
-The secret path segments live in [`anchor.env`](anchor.env) (`ANCHOR_API_PREFIX`,
-`DOWNLOAD_TOKEN`). **Keep `deploy/` private** — it holds those secrets.
+| Service | What | Where |
+|---------|------|-------|
+| `yaw-signaling` (systemd) | async WebSocket signaling (`websockets` + PyNaCl); challenge/join, presence, opaque sealed relay; per-IP/-conn **rate-limited**; writes `status.json` | `/home/fnlr/yaw-signaling/`, `127.0.0.1:8077` |
+| `coturn` | **STUN-only** (relay disabled — not an open relay), UDP+TCP 3478 | `/etc/turnserver.conf` |
+| `nginx` | TLS; serves the cover page + web client (static), WSS-proxies the signaling path | vhost below |
+| ~~`yaw-anchor`~~ | **RETIRED** — the old YAW/1 Flask directory (gunicorn `:8055`); `systemctl disable --now`d | — |
 
-## Server layout
+The signaling server has **no long-term key** (it verifies each node's Ed25519
+signature over a per-connection nonce), so there's nothing server-side to rotate.
 
-```
-/home/fnlr/yaw-anchor/
-  anchor/  wasteproto/        # app code (rsync target)
-  anchor.env                  # secrets, EnvironmentFile (chmod 600)
-  requirements.txt  .venv/    # py3.8 venv: Flask, Jinja2, pycryptodome, gunicorn
-  anchor.db                   # sqlite presence store (90s TTL rows)
-  dist/                       # the two client zips + download.html (served by nginx)
-```
+## nginx locations (real vhost is gitignored)
 
-- **Service:** `yaw-anchor.service` → gunicorn (1 worker, 4 threads) on
-  `127.0.0.1:8055`. nginx proxies `/` → it (ProxyFix on, so the node's real IP is
-  recorded, not nginx's).
-- **nginx vhost:** `/etc/nginx/sites-available/<anchor-host>` (original backed up to
-  `<anchor-host>.bak-pre-yaw`).
+The live vhost is `deploy/anchor.nginx` (gitignored); a sanitized template is
+[`anchor.nginx.example`](anchor.nginx.example). Locations:
+
+- `/` → static cover page (`/home/fnlr/cover/`)
+- `/<app-path>/` → web client (`alias /home/fnlr/yaw-web/`), **basic auth**
+  (`/etc/nginx/.htpasswd-yaw`)
+- `/<signal-path>/signal` → WSS proxy to `127.0.0.1:8077` (`X-Real-IP` set, so the
+  server logs the true peer IP)
+- `/<download-path>/` → static download area (`alias .../dist/`, `download.html`)
+
+Client endpoints come from config, never the repo: web `web/config.js` (gitignored,
+template `web/config.example.js`), CLI `~/.yaw/config` (see `cli/yaw2/config.py`).
 
 ## Operations
 
 ```sh
 # status / logs / restart  (magnus has passwordless sudo)
-ssh magnus@<server-host> 'sudo systemctl status yaw-anchor --no-pager'
-ssh magnus@<server-host> 'sudo journalctl -u yaw-anchor -n 50 --no-pager'
-ssh magnus@<server-host> 'sudo systemctl restart yaw-anchor'
+ssh magnus@<server-host> 'systemctl is-active yaw-signaling coturn nginx'
+ssh magnus@<server-host> 'sudo journalctl -u yaw-signaling -n 50 --no-pager'
+ssh magnus@<server-host> 'sudo systemctl restart yaw-signaling'
 
-# redeploy anchor code after local changes
-./deploy/redeploy.sh
+# who is connected right now (id, real IP, connect time, uptime)
+ssh magnus@<server-host> 'yawpeers'           # -l for full ids
 
-# roll nginx back to the pre-YAW vhost
-ssh magnus@<server-host> 'sudo cp /etc/nginx/sites-available/<anchor-host>.bak-pre-yaw \
-  /etc/nginx/sites-available/<anchor-host> && sudo nginx -t && sudo systemctl reload nginx'
+# deploy: rsync the relevant tree (NEVER --delete), then restart if code changed
+rsync -az signaling/  fnlr@<server-host>:/home/fnlr/yaw-signaling/
+rsync -az web/        fnlr@<server-host>:/home/fnlr/yaw-web/
 ```
 
-## Updating the client bundles
-
-Rebuild (`electron-client/`), then upload into `dist/` (nginx serves them
-directly):
-
-```sh
-cd electron-client
-./node_modules/.bin/electron-packager . YAW --platform=darwin --arch=arm64 \
-  --out=release --overwrite --asar --ignore="^/(release|test|tools|yawdata)($|/)"
-# ...zip as in release/ ... then:
-rsync -a release/yaw-*.zip fnlr@<server-host>:/home/fnlr/yaw-anchor/dist/
-```
+- **TLS:** Let's Encrypt via Certbot (auto-renews).
+- **Rotating the secret paths / basic-auth / network name:** [ROTATING_KEYS.md](../ROTATING_KEYS.md).
+- **Clients to hand out:** the web client (no install) + `desktop/` (Tauri) + `cli/`.
+  The download page is `download.html` (served at the secret download path).

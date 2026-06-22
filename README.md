@@ -36,9 +36,9 @@ decision (open a [YIP](docs/proposals/)).
    baseline — independent implementations build against it and the live server.
    Changes go through **YIPs**; breaking changes require agreement and a version bump
    (e.g. `yaw/2.1`), and ship **backward-compatibly** where possible.
-6. **One protocol, many clients, one crypto.** Browser, Python CLI, (planned) Tauri —
-   all speak the same wire. **libsodium everywhere** (PyNaCl / libsodium.js) so
-   signing and sealing are byte-identical across implementations.
+6. **One protocol, many clients, one crypto.** Browser, Python CLI, and a Tauri
+   desktop app — all speak the same wire. **libsodium everywhere** (PyNaCl /
+   libsodium.js) so signing and sealing are byte-identical across implementations.
 
 ## Repository layout
 
@@ -58,23 +58,34 @@ attic/        archived YAW/1 (WASTE) — frozen, gitignored, NOT part of v2
 
 ## Status
 
-**Live infrastructure** (on `<anchor-host>`):
+**Live infrastructure** (on `<anchor-host>`, secrets in gitignored config):
 
 | Service | What |
 |---------|------|
 | STUN | `stun:<anchor-host>:3478` (coturn, STUN-only) |
-| Signaling | WebSocket relay (secret path), sealed blobs only |
+| Signaling | WebSocket relay (secret path), sealed blobs only, auto-reconnect + rate-limited |
 | Web client | hosted behind a secret path + basic auth — open in a browser, no install |
 
-**Proven:** an authenticated, identity-bound DataChannel between the Python CLI and
-the browser/another CLI — over the *production* signaling + STUN — exchanging chat
-both ways and a hash-verified file (see `cli/test_spike_live.py`). JS ↔ Python
-crypto is verified byte-identical.
+**Clients:** browser (`web/`), Python CLI (`cli/`), and a Tauri **desktop app**
+(`desktop/`, builds; key in the OS keychain). All speak the same wire and share
+contact cards + `*.yawkey` key backups.
 
-**Spike caveats (next to harden):** the current clients **trust any id on the
-network (TOFU)** — the keyring gate (policy #3) is the first thing to add. True
-cross-NAT traversal needs peers on *different* networks to validate. Tauri shell and
-`yaw/2.1` are not built yet.
+**Working & tested live:**
+
+- **Trust** — keyring-gated, friend-to-friend (mutual `accept`); no more TOFU.
+  Contacts carry **nicknames**, exchanged as a **contact card** (`yaw:<id>?n=<nick>`).
+- **Messaging & files** — chat, direct file transfer, and WASTE-style **folder
+  browse/share**, all over the DTLS DataChannel (the anchor never sees them).
+- **Identity** — passphrase-encrypted `*.yawkey` backup + portable **contacts
+  export**; one identity restores across CLI / browser / desktop (byte-verified).
+- **Resilience** — signaling **auto-reconnects** (media survives the blip), the
+  server is **rate-limited**, peers show **connection status**, and a **self-diagnostic**
+  (`cli/diagnose.py` / "Test my connectivity") answers "can others reach me?".
+- **Forward secrecy** — `yaw/2.1` (ephemeral-key signaling, YIP-0001) is implemented
+  in the **CLI**, opportunistic with a 2.0 fallback and a `require_fs` cutover switch.
+
+**Next:** mirror `yaw/2.1` to the web client + deploy (security review), a real
+cross-NAT test on separate networks, and Tauri distribution (signing/notarization).
 
 ## For users
 
@@ -126,7 +137,10 @@ identity-bind byte order, the DataChannel open-race).
   (DTLS). The server never sees it.
 - **Signaling** is sealed end-to-end; the server can't read SDP, candidate IPs, or
   content — only presence/timing within a hashed network. In `2.0` the sealing keys
-  are static (not forward-secret); `2.1` (drafted) fixes this. See
-  [`docs/yaw2.0-protocol.md` §11](docs/yaw2.0-protocol.md) and
+  are static (not forward-secret); **`2.1` fixes this with per-session ephemeral keys
+  — implemented in the CLI (opportunistic, falls back to 2.0), web rollout pending.**
+  See [`docs/yaw2.1-protocol.md`](docs/yaw2.1-protocol.md) and
   [YIP-0001](docs/proposals/yip-0001-forward-secret-signaling.md).
 - **Trust** is the keyring; verify a contact's short id out of band before accepting.
+- **Keys at rest** — browser `localStorage`, CLI `~/.yaw/identity`, or the **OS
+  keychain** in the desktop app; the `*.yawkey` backup is passphrase-encrypted.

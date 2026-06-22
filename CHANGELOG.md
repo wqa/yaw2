@@ -4,6 +4,43 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-22 — A window of its own
+On this day in 1978 astronomers spotted Charon — Pluto finally had a steady companion
+sharing its sky. YAW got one too: a desktop client that's the same identity as the rest.
+
+- **Tauri desktop app** (`desktop/`) wraps the web client in a native window and keeps
+  your identity in the **OS keychain** (macOS Keychain / Windows Credential Manager /
+  Linux secret-service) instead of browser `localStorage` — so it survives clearing the
+  app's data. Builds clean on macOS; `desktop/run.sh` launches it from any shell
+  (sources Cargo itself, so no `command not found`).
+- Squashed the webview gotchas: `window.prompt()` is a no-op in Tauri (replaced with an
+  in-page modal, so Restore/Back-up/rename actually work), and the key-storage caption
+  now tells the truth per environment instead of always saying "in this browser".
+- `cli/export_key.py` — one command to export `~/.yaw/identity` to a `*.yawkey`, so you
+  can carry your existing (already-shared) identity into the web or desktop client.
+- Refreshed the **download page** for v2: it had been advertising retired YAW/1 clients
+  that can't even join the network.
+
+### 2026-06-22 — The line that heals, and secrets that expire
+On this day in 1990 a crane lifted Checkpoint Charlie out of Berlin, retiring a guarded
+crossing for good. We taught the mesh to keep its companions and forget its crossings:
+
+- **Auto-reconnecting signaling** — a dropped WebSocket re-handshakes with backoff and
+  resyncs presence; because media is peer-to-peer, live chats and transfers sail through
+  the blip untouched.
+- **Rate-limited signaling server** — per-IP connection and per-connection frame caps;
+  flood protection that normal use never approaches.
+- **Connection status + self-diagnostic** — peers show connecting / connected / failed,
+  and "Test my connectivity" (`cli/diagnose.py`) reports whether STUN can reach you, so a
+  restrictive-NAT failure reads as an answer instead of a silent hang.
+- **Portable contacts** (`yaw-contacts-1`) — trusted ids + nicknames export/import as a
+  file, complementing the identity-only key backup.
+- **Forward-secret signaling** (`yaw/2.1`, [YIP-0001](docs/proposals/yip-0001-forward-secret-signaling.md))
+  landed in the CLI: per-session ephemeral X25519, so recorded signaling stays unreadable
+  even if long-term keys leak later. Opportunistic (falls back to 2.0 with older peers),
+  with a `require_fs` switch for the eventual cutover — run 2.0 and 2.1 side by side now,
+  flip the switch once everyone's upgraded. Live-tested; web rollout pending review.
+
 ### 2026-06-21 — Scrubbing the disguise clean
 On the night of 20–21 June 1791 Louis XVI fled Paris dressed as a valet and was
 recognized at Varennes — a disguise leaks at exactly the seam you forget. So we went

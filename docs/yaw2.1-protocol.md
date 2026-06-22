@@ -3,6 +3,12 @@
 **Version:** `yaw/2.1` · **Status:** 📝 **DRAFT** (proposed) · motivated by
 [YIP-0001](proposals/yip-0001-forward-secret-signaling.md).
 
+> **Reference implementation:** the Python CLI (`cli/`) implements this spec —
+> opportunistic, with a `require_fs` cutover switch — and is verified live
+> (`cli/test_fs_live.py`: 2.1↔2.1 forward-secret, 2.1↔2.0 fallback, require-FS
+> refusing a 2.0 peer). The web/desktop rollout is pending review; the deployed
+> server is untouched (2.1 is purely client-side, §5.4').
+
 > **2.1 = [2.0](yaw2.0-protocol.md) + forward-secret signaling.** This document is a
 > **delta**: everything in [yaw2.0-protocol.md](yaw2.0-protocol.md) still applies
 > *except* the sections replaced below (§3, §5.4, §6). Identity, signaling

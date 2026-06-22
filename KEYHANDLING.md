@@ -19,18 +19,23 @@ forms only once you have each accepted the other's id.
 
 ## Where it lives
 
-| | CLI peer | Web client |
-|---|---|---|
-| Identity (secret seed) | `~/.yaw/identity` — file, mode `0600`, **plaintext** | browser `localStorage` key `yaw2_seed`, **plaintext** |
-| Your nickname | `~/.yaw/nick` | `localStorage` `yaw2_nick` |
-| Keyring (trusted ids + nicknames) | `~/.yaw/keyring` | `localStorage` `yaw2_keyring` |
+| | CLI peer | Web client (browser) | Desktop app (Tauri) |
+|---|---|---|---|
+| Identity (secret seed) | `~/.yaw/identity` — file, mode `0600`, **plaintext** | `localStorage` `yaw2_seed`, **plaintext** | **OS keychain** (service `yaw`, account `seed`) |
+| Your nickname | `~/.yaw/nick` | `localStorage` `yaw2_nick` | `localStorage` `yaw2_nick` |
+| Keyring (trusted ids + nicknames) | `~/.yaw/keyring` | `localStorage` `yaw2_keyring` | `localStorage` `yaw2_keyring` |
 
-Two warnings:
+**Each store is separate** — a fresh client mints its *own* new identity unless you
+restore one. There is no auto-import between them; the `*.yawkey` backup is the bridge.
+
+Warnings:
 
 - **`localStorage` is not a backup.** Clearing site data, a private window, browser
   eviction, or losing the device erases it — with no copy anywhere.
 - The CLI `~/.yaw/identity` is on disk but **unencrypted** (only protected by file
   permissions). Anyone who can read that file has your key.
+- The **desktop app's keychain** entry is the most durable store (survives clearing
+  the app's data), but it's still tied to that one machine — back it up too.
 
 So: **export an encrypted backup and keep it safe.** That is the durable copy.
 
@@ -49,17 +54,17 @@ contacts / nicknames) — see [What moves and what doesn't](#what-moves-and-what
 
 ## Back up your key
 
-**From the CLI** — start the peer, then:
+**From the CLI** — either start the peer and run `/export ~/Desktop/magnus.yawkey`,
+or, without connecting, one command:
 
+```sh
+cli/.venv/bin/python cli/export_key.py ~/Desktop/magnus.yawkey
 ```
-/export ~/Desktop/magnus.yawkey
-  passphrase: ********
-```
 
-(The file is written `0600`. Choose a strong passphrase — it is the only thing
-protecting the key inside.)
+It prints your id, asks for a passphrase twice, and writes the `0600` file. Choose a
+strong passphrase — it is the only thing protecting the key inside.
 
-**From the web client** — click **Back up key**, enter a passphrase, and a
+**From the web / desktop client** — click **Back up key**, enter a passphrase, and a
 `yaw-identity-<id8>.yawkey` file downloads. Store it somewhere safe (password
 manager, encrypted drive).
 
@@ -75,6 +80,10 @@ accepted your card reach you in the web client too.
    the `.yawkey` file, and enter the **same passphrase**.
 4. The web client now shows the same id as your CLI. Click **Connect**.
    (If you were already connected under a different identity, reload the page first.)
+
+> **Desktop app:** identical — **Restore key** in the Tauri app writes the seed into
+> the **OS keychain**, then reload the window. (The desktop app mints its own fresh
+> identity on first run, so restore is how you make it *you*.)
 
 ## Move your identity: web → CLI
 

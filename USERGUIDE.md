@@ -80,5 +80,7 @@ handshake, never the name.
 
 ---
 
-*Prefer the terminal? There's a command-line client in the project (`cli/`) that speaks
-the same network and uses the same contact cards and key backups.*
+**Other clients** — same network, same contact cards and key backups: a **command-line
+client** (`cli/`) for the terminal, and a **desktop app** (a native window that keeps
+your key in the OS keychain) — ask your host for a build. You can move your identity
+between any of them with a key backup (see KEYHANDLING.md).
