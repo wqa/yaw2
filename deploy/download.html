@@ -45,8 +45,9 @@
     <a class="dl" href="./yaw-desktop-macos-arm64.zip">
       <b>🖥 Desktop app — macOS (Apple Silicon)<span class="ver">yaw/2.1</span></b>
       <span>.zip · 3 MB · native window; your key lives in the macOS Keychain (survives
-      clearing app data). Unsigned beta — unzip, then <b>right-click YAW.app → Open</b>
-      on first launch (else macOS calls it "damaged"/"unidentified developer"). Windows
+      clearing app data). <b>Unsigned beta</b> — macOS blocks it as "damaged", so after
+      unzipping run once in Terminal:
+      <code>xattr -dr com.apple.quarantine YAW.app</code> &nbsp;then open it. Windows
       &amp; Linux: build from source (github.com/wqa/yaw2 → <code>desktop/</code>).</span>
     </a>
 
