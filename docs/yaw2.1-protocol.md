@@ -104,8 +104,14 @@ verify; setRemoteDescription ◀──"to A"── sealEph(answer.sdp)
   `answer` only after it has both sent its `ekey` and received the `offer`. Because
   a sender's `ekey` precedes its ephemeral boxes and the channel is ordered, the
   recipient always holds the peer's `epk` before any ephemeral box arrives.
-- Everything after the DataChannel opens (the signed `hello`, §8, §9) is **identical
-  to 2.0**.
+- Everything after the DataChannel opens (the `hello`, §8, §9) is **identical to 2.0** —
+  including the **§6 post-lock errata on verification**: do not gate `verified` on the
+  `hello` fingerprint `sig` (it can't match across WebRTC stacks). In 2.1 the binding is
+  especially clean: the `ekey` carries an **Ed25519 signature over `epk` bound to both
+  ids** (§5.4′), so opening the ephemeral `offer`/`answer` proves the peer's identity, and
+  the SDP it carries fixes the DTLS cert WebRTC enforces. So a 2.1 session is **verified**
+  when an authenticated (ephemeral or static-fallback) box has been opened from the
+  expected id **and** `hello.id` matches — never on the fingerprint signature.
 
 ### §6.1 Backward compatibility (opportunistic FS)
 

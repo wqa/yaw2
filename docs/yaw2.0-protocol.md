@@ -220,6 +220,33 @@ DTLS fingerprints parsed from the local/remote SDP `a=fingerprint:sha-256 …` l
 
 After `hello` verification the session is **trusted and live**.
 
+> ### ⚠️ Post-lock clarification (errata) — read this before implementing verification
+>
+> The `hello` fingerprint-bind above (the `sig` over `"yaw/2 bind" || lfp || rfp`, and
+> the "MUST use `sha-256`" rule) **does not work across heterogeneous WebRTC stacks** and
+> **must not be the verification gate**. Two reasons, both load-bearing:
+>
+> 1. **Different stacks advertise a cert under different hash algorithms.** A WebKit/Safari
+>    peer publishes its DTLS fingerprint as `sha-512`; aiortc and Chromium use `sha-256`.
+>    Each end extracts the *other's* advertised fingerprint, so for the **same** certificate
+>    the two ends hold **different bytes** — the signed bind never matches, giving a permanent
+>    "signature mismatch" (channel up, but never marked verified). Hard-matching only
+>    `a=fingerprint:sha-256` also yields an **empty** local fingerprint on such a stack.
+> 2. **It's redundant.** The identity is already bound to the channel *without* the hello:
+>    §5.4 / §7 — the `offer`/`answer` (which carry the DTLS fingerprint that WebRTC then
+>    enforces) arrive inside an **Ed25519-authenticated sealed box**, so opening one proves
+>    it came from the peer's identity, and the channel cannot use a cert other than the one
+>    in that authenticated SDP.
+>
+> **Therefore, the normative rule implementations actually follow (and that the reference
+> web/CLI/desktop clients implement):** a session is **verified** iff
+> **(a)** you have successfully opened ≥1 authenticated sealed box from the expected peer id
+> during signaling (always true by the time the `yaw` channel opens — opening it required an
+> authenticated `offer`/`answer`), **and (b)** the `hello.id` received on the channel equals
+> that id. The `hello` still MAY carry the legacy `sig` for backward compatibility, but a
+> verifier **MUST NOT** reject the session if that `sig` fails — treat it as informational.
+> See `docs/yaw2-implementation.md` §9 for the full implementor treatment.
+
 ## 7. Why this is safe against a malicious anchor
 
 - The anchor relays only **sealed, sender-authenticated** blobs, so it cannot read
@@ -361,9 +388,12 @@ The reference infra is **live**: STUN `stun:<anchor-host>:3478` and signaling
 - **base64 variant.** The seal is **standard padded** base64, not libsodium's
   default url-safe/no-padding. Using `to_base64(x)` without
   `base64_variants.ORIGINAL` produces an unopenable box.
-- **bind byte order on verify.** The sender signs `prefix||local||remote`; the
-  verifier must reconstruct `prefix||remote||local` (its remote = the sender's
-  local). Getting this backwards verifies nothing.
+- **don't gate verification on the `hello` fingerprint `sig`.** See the **§6 post-lock
+  errata**: it can't match across WebRTC stacks (WebKit `sha-512` vs aiortc `sha-256`
+  for the same cert). Verify via the authenticated sealed signaling + matching
+  `hello.id` instead. (If you do still compute the legacy bind, the byte order is
+  `prefix||local||remote` on sign, `prefix||remote||local` on verify — but it is not
+  the gate.)
 - **answerer DataChannel open-race.** The received `"yaw"` channel is often already
   `open` when you get it; send your `hello` on `readyState==="open"` too, not only
   the `open` event, or both sides wait forever.

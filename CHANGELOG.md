@@ -4,6 +4,23 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-22 — Docs: spell out the verification quirk for outsiders
+On this day in 1633 a man was handed a verdict that didn't match the sky; good
+documentation is how you keep the verdict and the sky in sync. Clarified the identity-
+verification logic across the protocol docs so an external implementor won't repeat the
+sha-256 trap.
+
+- **`docs/yaw2-implementation.md` §9** now states the rule plainly: verify on *opened an
+  authenticated sealed box from the expected id* **+** *matching `hello.id`*, and MUST NOT
+  gate on the legacy DTLS-fingerprint `sig`; the cross-stack hash quirk (WebKit `sha-512`
+  vs aiortc `sha-256`) is called out as *the* gotcha. Fixed the leftover spots (security
+  model, interop pitfalls, constants table, worked example) that still implied otherwise.
+- **`docs/yaw2.0-protocol.md`** (LOCKED) gains a marked **post-lock errata** in §6 — the
+  normative text is preserved, but readers are told the fingerprint-bind can't be the gate
+  and why; the interop-gotchas list points at it.
+- **`docs/yaw2.1-protocol.md`** explains why 2.1's signed-ephemeral handshake makes the
+  identity↔channel binding especially clean, and inherits the same errata.
+
 ## [2.1.0] — 2026-06-22 — first versioned release (web · desktop · CLI)
 Protocol **yaw/2.1**; app/release version **2.1.0**. Headline since `0.1.0`: directory-tree
 sharing, the cross-stack identity-verification fix, the reconnect-storm fix, the

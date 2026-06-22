@@ -311,11 +311,28 @@ the channel — and (b) the `hello` it sends over the channel carries the matchi
 ```
 
 The `hello` conveys the self-asserted `id`, an optional display `nick`, and `caps`
-(capabilities, e.g. `"share"`, §12). An implementation MUST treat the session as
-**unauthenticated** if `hello.id` ≠ the expected peer id, or if it has not opened an
-authenticated box from that id.
+(capabilities, e.g. `"share"`, §12).
 
-> **Why not sign the DTLS fingerprint?** Earlier drafts had each side sign
+**Verification, precisely — what an implementor MUST do:**
+
+1. Mark the session **verified** *iff both*: (a) you have successfully **opened at
+   least one sealed signaling box** from this peer id (`ekey`/`offer`/`answer`) — a box
+   that isn't from that identity fails the Poly1305 tag and is dropped, so a single
+   successful open authenticates the sender; and (b) the `hello.id` received on the
+   channel **equals the peer id you expected**. By the time the `yaw` channel opens you
+   have always satisfied (a), because opening it *required* exchanging an authenticated
+   `offer`/`answer`. So in practice: *channel open + matching `hello.id` ⇒ verified.*
+2. **MUST NOT** gate verification on any DTLS-fingerprint signature in `hello`. Older
+   builds still send a legacy `sig`; treat it as informational and **ignore it for the
+   verified/unverified decision** — it cannot be made to validate across different
+   WebRTC stacks (the quirk below).
+3. Trust (the keyring, §6) is a **separate** check made *before* you offer/answer: you
+   only set up a session with an id you have accepted out of band. Verification then
+   confirms the party on the other end of *this* channel really holds that id.
+4. If `hello.id` ≠ the expected id, treat the session as **unauthenticated** and do not
+   present it as verified (drop it, or surface a clear warning).
+
+> **Why not sign the DTLS fingerprint? (the quirk to know)** Earlier drafts had each side sign
 > `prefix || own_fp || peer_fp` (fingerprints lifted from the SDP) inside the `hello`.
 > That breaks across heterogeneous WebRTC stacks: a certificate is advertised under
 > whatever hash the stack picked (WebKit `sha-512`, aiortc `sha-256`, …), so the two ends
@@ -498,7 +515,7 @@ cutover once everyone has upgraded); otherwise it MUST surface FS status to the 
 |---|---|
 | Protocol versions | `yaw/2.0` (challenge `v`), `yaw/2.1` (ekey `v`) |
 | Net-hash prefix | `"yaw2-net:"` (ASCII), then SHA-256, hex |
-| Sign-bind prefix (hello) | `"yaw/2 bind"` (10 bytes) |
+| Sign-bind prefix (hello) | `"yaw/2 bind"` (10 bytes) — *legacy fingerprint sig only; not the verification gate (§9)* |
 | Sign prefix (ekey) | `"yaw/2.1 ekey"` (12 bytes) |
 | Sealed-box base64 | standard, padded (libsodium `ORIGINAL`) |
 | Sealed-box layout | `nonce(24) || mac(16) || ciphertext` |
@@ -526,8 +543,11 @@ cutover once everyone has upgraded); otherwise it MUST surface FS status to the 
 - **Signaling** is sealed end-to-end. In **2.0** the sealing keys are static (derived
   from long-term identity keys), so recorded signaling could be decrypted if those
   keys later leak. **2.1** closes this with ephemeral keys wiped after the session.
-- **Identity binding** (§9) prevents a malicious anchor from man-in-the-middling: it
-  would have to forge an Ed25519 signature over the real DTLS fingerprints.
+- **Identity binding** (§9) prevents a malicious anchor from man-in-the-middling: the
+  `offer`/`answer` (which carry the DTLS fingerprint WebRTC then enforces) travel inside
+  Ed25519-authenticated sealed boxes, so the anchor cannot substitute its own SDP/cert
+  without breaking a box it cannot forge. Verification rests on this, **not** on the
+  legacy fingerprint signature in `hello` (§9).
 - **Metadata the anchor learns:** presence, timing, peer IPs (at signaling time via
   the relayed candidates in 2.0 — sealed, but the endpoints are the peers'), and the
   contact graph within a hashed net. It does **not** learn the network name or content.
@@ -541,7 +561,10 @@ cutover once everyone has upgraded); otherwise it MUST surface FS status to the 
 1. **Base64 variant** — sealed boxes are **standard padded** base64, not URL-safe.
 2. **Net hashing** — `SHA-256("yaw2-net:" + name)`, hex; sign join over
    `nonce_bytes || utf8(net_hex_string)` (the hex *string*, not raw bytes).
-3. **`hello` bind byte order** — sign `prefix || own_fp || peer_fp`; the verifier swaps.
+3. **Verification basis (the big one)** — gate `verified` on *opened-an-authenticated-box
+   + matching `hello.id`* (§9), **never** on a DTLS-fingerprint signature: peers on
+   different WebRTC stacks report the same cert under different hash algorithms (WebKit
+   `sha-512`, aiortc `sha-256`), so a fingerprint bind never matches cross-stack.
 4. **DataChannel open-race** — a received channel can already be `open`; send `hello`
    on a `readyState === "open"` check too.
 5. **Non-trickle** — gather ICE to completion before sending SDP; no candidate messages.
@@ -572,9 +595,10 @@ A→B  to{ box=[static] {"kind":"ekey","v":"yaw/2.1","epk":"7b4e…3f13","sig":"
 B→A  to{ box=[eph]    {"kind":"offer","sdp":"v=0…"} }          # B holds epkA → ephemeral
 A→B  to{ box=[eph]    {"kind":"answer","sdp":"v=0…"} }         # answer matches offer keying
         ICE checks → DTLS → "yaw" DataChannel opens
-A→B  (dc) {"type":"hello","id":"8a88…","nick":"magnus","caps":[],"sig":"fa51…d904"}
-B→A  (dc) {"type":"hello","id":"8139…","nick":"felix","sig":"…"}
-        both verify hello → connected, forward-secret
+A→B  (dc) {"type":"hello","id":"8a88…","nick":"magnus","caps":[]}   # sig optional/legacy
+B→A  (dc) {"type":"hello","id":"8139…","nick":"felix"}
+        each side already opened the other's sealed offer/answer (→ identity authenticated);
+        hello.id matches the expected peer → verified, connected, forward-secret
 A→B  (dc) {"type":"chat","text":"hi"}
 ```
 
