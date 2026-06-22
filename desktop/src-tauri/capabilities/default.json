@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions for the main window. App-defined commands (key_save/key_load/key_delete) are callable from the frontend.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

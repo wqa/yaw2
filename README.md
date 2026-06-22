@@ -51,6 +51,7 @@ signaling/    the anchor's WebSocket signaling server (Python, asyncio + PyNaCl)
 cli/          YAW/2 Python client — yaw2/ (identity, signaling, aiortc peer)
                 + spike_peer.py (interactive) + test_spike_live.py
 web/          browser client — index.html, yaw2.js, vendored libsodium
+desktop/      Tauri shell wrapping the web client (scaffold; OS-keychain ready)
 deploy/       server config (nginx, systemd, coturn); secrets are gitignored
 attic/        archived YAW/1 (WASTE) — frozen, gitignored, NOT part of v2
 ```

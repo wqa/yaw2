@@ -1,0 +1,21 @@
+[package]
+name = "yaw"
+version = "0.1.0"
+description = "YAW desktop client"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "yaw_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# OS keychain: macOS Keychain / Windows Credential Manager / Linux libsecret.
+# This is the desktop value-add over the browser's localStorage seed.
+keyring = "3"
