@@ -95,6 +95,32 @@
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
     const short = (id) => esc((id || '').slice(0, 12)) + '…';
 
+    // In-page prompt — window.prompt() is a no-op inside the Tauri webview.
+    // Resolves to the entered string, or null on cancel. Works in browser + Tauri.
+    function askText(message, opts = {}) {
+      return new Promise((resolve) => {
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1000';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#1c1f24;border:1px solid #2b313a;border-radius:10px;padding:1rem;width:min(420px,92vw);display:flex;flex-direction:column;gap:.6rem';
+        const lbl = document.createElement('div'); lbl.textContent = message; lbl.style.fontSize = '.9rem';
+        const inp = document.createElement('input');
+        inp.type = opts.password ? 'password' : 'text';
+        inp.value = opts.value || '';
+        inp.style.cssText = 'width:100%;margin:0;padding:.45rem .5rem;background:#0e1014;border:1px solid #2b313a;border-radius:6px;color:#e6e8ec';
+        const rowb = document.createElement('div'); rowb.style.cssText = 'display:flex;gap:.5rem;justify-content:flex-end';
+        const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+        const ok = document.createElement('button'); ok.textContent = 'OK'; ok.className = 'primary'; ok.style.width = 'auto';
+        rowb.append(cancel, ok); box.append(lbl, inp, rowb); ov.append(box); document.body.append(ov);
+        inp.focus(); inp.select();
+        const done = (v) => { ov.remove(); resolve(v); };
+        cancel.onclick = () => done(null);
+        ok.onclick = () => done(inp.value);
+        inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } else if (e.key === 'Escape') done(null); };
+        ov.onclick = (e) => { if (e.target === ov) done(null); };
+      });
+    }
+
     // Deployment defaults come from config.js (gitignored), never the repo.
     (() => {
       const c = window.YAW_CONFIG || {};
@@ -128,7 +154,7 @@
         const row = document.createElement('div');
         row.style.cssText = 'cursor:pointer'; row.title = 'click to rename';
         row.textContent = '  ' + (nk || '(no nick)') + ' · ' + id.slice(0, 8) + '…';
-        row.onclick = () => { const nn = prompt('Nickname for ' + id.slice(0, 12) + '…', nk || ''); if (nn !== null) { node.keyring.rename(id, nn); refreshKeys(); refreshPeers(); } };
+        row.onclick = async () => { const nn = await askText('Nickname for ' + id.slice(0, 12) + '…', { value: nk }); if (nn !== null) { node.keyring.rename(id, nn); refreshKeys(); refreshPeers(); } };
         $('keys').appendChild(row);
       }
     }
@@ -167,7 +193,7 @@
         const b = document.createElement('button'); b.textContent = 'accept';
         b.style.cssText = 'font-size:.7rem;padding:.05rem .4rem';
         b.onclick = async () => {
-          const nn = prompt('Nickname for this contact (optional):', kw.nick || '');
+          const nn = await askText('Nickname for this contact (optional):', { value: kw.nick || '' });
           try { await node.accept(kw.peer, nn || ''); untrusted.delete(kw.peer); refreshKeys(); line('sys', `accepted ${label(kw.peer)} — connecting…`); }
           catch (e) { line('sys', 'error: ' + esc(e.message)); }
         };
@@ -272,9 +298,9 @@
       $('contactsfile').value = '';
     };
 
-    $('backupkey').onclick = () => {
+    $('backupkey').onclick = async () => {
       if (!ident) return;
-      const pass = prompt('Choose a passphrase to encrypt your key backup:');
+      const pass = await askText('Choose a passphrase to encrypt your key backup:', { password: true });
       if (!pass) return;
       const backup = ident.exportBackup(pass);
       const a = document.createElement('a');
@@ -286,7 +312,7 @@
     $('restorekey').onclick = () => $('keyfile').click();
     $('keyfile').onchange = async () => {
       const f = $('keyfile').files[0]; if (!f) return;
-      const pass = prompt('Passphrase for this key backup:');
+      const pass = await askText('Passphrase for this key backup:', { password: true });
       if (!pass) { $('keyfile').value = ''; return; }
       try {
         await YAW.ready();
