@@ -12,6 +12,10 @@ implementation has been retired (see [`attic/`](#repository-layout)).
 > **[`yaw/2.0`](docs/yaw2.0-protocol.md) (LOCKED)** with a drafted
 > **[`yaw/2.1`](docs/yaw2.1-protocol.md)** for forward-secret signaling.
 
+> **Current release: `v2.1.0`** (web · desktop · CLI), all speaking protocol
+> **`yaw/2.1`**. The app/release version and the wire-protocol version are tracked
+> separately; see [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Design policy
 
 These are the rules the codebase upholds. Changing any of them is a protocol-level

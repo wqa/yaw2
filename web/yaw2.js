@@ -6,6 +6,7 @@ const YAW = (() => {
   let S = null; // libsodium, after ready
   const STUN = (typeof window !== 'undefined' && window.YAW_CONFIG && window.YAW_CONFIG.stunURL)
     || 'stun:your-anchor.example:3478';   // real value comes from config.js (gitignored)
+  const VERSION = '2.1.0';              // client release version (app build; see CHANGELOG)
   const PROTO = 'yaw/2.1';              // protocol this client speaks (2.0-compatible)
   const BIND_PREFIX = 'yaw/2 bind';
   const EKEY_PREFIX = 'yaw/2.1 ekey';   // signed context for the ephemeral-key message
@@ -514,5 +515,5 @@ const YAW = (() => {
     forget(id) { return this.keyring.remove(id); }
   }
 
-  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick, diagnose, inTauri, PROTO };
+  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick, diagnose, inTauri, PROTO, VERSION };
 })();

@@ -4,6 +4,11 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-06-22 — first versioned release (web · desktop · CLI)
+Protocol **yaw/2.1**; app/release version **2.1.0**. Headline since `0.1.0`: directory-tree
+sharing, the cross-stack identity-verification fix, the reconnect-storm fix, the
+file-transfer ordering fix, and a signed + notarized macOS desktop build.
+
 ### 2026-06-22 — Trust the sealed letter, not the wax under a different lamp
 On this day in 1865 news of a months-old proclamation finally reached Galveston — the
 truth had been authenticated all along; only the *delivery* lagged. Here too: a peer's
