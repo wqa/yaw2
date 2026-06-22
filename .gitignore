@@ -28,4 +28,7 @@ target/
 # OS
 .DS_Store
 .env
-.env
+
+# Local-only test/runtime data (chat logs, trust list)
+.trusthese
+logs/
