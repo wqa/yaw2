@@ -7,6 +7,8 @@ const YAW = (() => {
   const STUN = (typeof window !== 'undefined' && window.YAW_CONFIG && window.YAW_CONFIG.stunURL)
     || 'stun:your-anchor.example:3478';   // real value comes from config.js (gitignored)
   const BIND_PREFIX = 'yaw/2 bind';
+  const EKEY_PREFIX = 'yaw/2.1 ekey';   // signed context for the ephemeral-key message
+  const FS_TIMEOUT = 2000;              // wait for peer's ekey before 2.0 fallback (ms)
   const CHUNK = 64 * 1024;
   const enc = (s) => new TextEncoder().encode(s);
 
@@ -156,7 +158,8 @@ const YAW = (() => {
             if (initial) resolve(peers);
             else if (this._cbs.onReconnect) this._cbs.onReconnect(peers);
           } else if (m.type === 'from') {
-            try { this._cbs.onFrom(m.from, JSON.parse(S.to_string(this.id.open(m.from, m.box)))); } catch (e) {}
+            // deliver the raw sealed box; the peer opens it (it owns static + ephemeral keys)
+            this._cbs.onFrom(m.from, m.box);
           } else if (m.type === 'peer-join') this._cbs.onJoin(m.id);
           else if (m.type === 'peer-leave') this._cbs.onLeave(m.id);
         };
@@ -168,8 +171,9 @@ const YAW = (() => {
       this._backoff = Math.min(this._backoff * 2, 30000);
       setTimeout(() => { if (!this._closed) this._open(false).catch(() => {}); }, delay);
     }
-    sendTo(toId, obj) {
-      try { this.ws.send(JSON.stringify({ type: 'to', to: toId, box: this.id.seal(toId, enc(JSON.stringify(obj))) })); } catch (e) {}
+    sendTo(toId, box) {
+      // `box` is already a sealed payload (the peer picks static vs ephemeral keying)
+      try { this.ws.send(JSON.stringify({ type: 'to', to: toId, box })); } catch (e) {}
     }
     close() { this._closed = true; if (this.ws) this.ws.close(); }
   }
@@ -199,7 +203,7 @@ const YAW = (() => {
   }
 
   class Peer {
-    constructor(id, sig, peerId, on, share, nick) {
+    constructor(id, sig, peerId, on, share, nick, fs) {
       this.id = id; this.sig = sig; this.peerId = peerId; this.on = on;
       this.share = share || null;   // Map<name, File> we host (optional)
       this.nick = nick || '';       // our self-asserted display nick (informational)
@@ -208,21 +212,91 @@ const YAW = (() => {
       this._recv = {}; this._send = {};
       this.pc.ondatachannel = (ev) => this._wire(ev.channel);
       this.pc.onconnectionstatechange = () => this.on('status', { peer: this.peerId, state: this.pc.connectionState });
+
+      // yaw/2.1 forward-secret signaling: per-session ephemeral X25519 (§3'/§6').
+      this.fs = fs !== false;
+      const kp = this.fs ? S.crypto_box_keypair() : null;
+      this._esk = kp ? kp.privateKey : null;
+      this._epk = kp ? kp.publicKey : null;   // Uint8Array(32)
+      this.peer_epk = null;                    // peer's ephemeral pubkey once known
+      this.sessionFs = false;                  // did this session end up forward-secret
+      this._ekeySent = false; this._offerPending = false; this._offered = false;
+    }
+    // -- signaling seal/open (yaw/2.1 §5.4'/§6') -------------------------------
+    _seal(obj, preferEph) {
+      const data = enc(JSON.stringify(obj));
+      if (preferEph && this.peer_epk && this._esk) {
+        const nonce = S.randombytes_buf(24);
+        const ct = S.crypto_box_easy(data, nonce, this.peer_epk, this._esk);
+        return [S.to_base64(concat(nonce, ct), S.base64_variants.ORIGINAL), true];
+      }
+      return [this.id.seal(this.peerId, data), false];   // static (2.0)
+    }
+    _open(box) {                                // -> [plaintext|null, usedEphemeral]
+      if (this.peer_epk && this._esk) {
+        try {
+          const raw = S.from_base64(box, S.base64_variants.ORIGINAL);
+          return [S.crypto_box_open_easy(raw.slice(24), raw.slice(0, 24), this.peer_epk, this._esk), true];
+        } catch (e) {}
+      }
+      try { return [this.id.open(this.peerId, box), false]; } catch (e) { return [null, false]; }
+    }
+    _sendEkey() {
+      if (!this.fs || this._ekeySent) return;
+      this._ekeySent = true;
+      const signed = concat(enc(EKEY_PREFIX), S.from_hex(this.id.id), S.from_hex(this.peerId), this._epk);
+      const msg = { kind: 'ekey', v: 'yaw/2.1', epk: S.to_hex(this._epk), sig: S.to_hex(this.id.sign(signed)) };
+      const [box] = this._seal(msg, false);     // ekey is always static
+      this.sig.sendTo(this.peerId, box);
+    }
+    async _onEkey(obj) {
+      if (!this.fs || this.peer_epk) return;
+      try {
+        const epkRaw = S.from_hex(obj.epk || '');
+        const sig = S.from_hex(obj.sig || '');
+        const signed = concat(enc(EKEY_PREFIX), S.from_hex(this.peerId), S.from_hex(this.id.id), epkRaw);
+        if (epkRaw.length !== 32 || !Identity.verify(this.peerId, signed, sig)) return;
+        this.peer_epk = epkRaw;
+      } catch (e) { return; }
+      this._sendEkey();                          // reciprocate (idempotent)
+      if (this._offerPending) await this._doOffer();
     }
     async startOffer() {
+      if (this.fs) {
+        this._sendEkey();
+        this._offerPending = true;
+        setTimeout(() => { if (this._offerPending) this._doOffer(); }, FS_TIMEOUT);
+        if (this.peer_epk) await this._doOffer();   // peer's ekey already arrived
+      } else {
+        await this._doOffer();
+      }
+    }
+    async _doOffer() {
+      if (this._offered) return;
+      this._offered = true; this._offerPending = false;
       this.dc = this.pc.createDataChannel('yaw');
       this._wire(this.dc);
       await this.pc.setLocalDescription(await this.pc.createOffer());
       await gatherComplete(this.pc);
-      this.sig.sendTo(this.peerId, { kind: 'offer', sdp: this.pc.localDescription.sdp });
+      const [box, eph] = this._seal({ kind: 'offer', sdp: this.pc.localDescription.sdp }, this.fs);
+      this.sessionFs = eph;
+      this.sig.sendTo(this.peerId, box);
     }
-    async handleSignal(obj) {
-      if (obj.kind === 'offer') {
+    async onBox(box) {                            // open one relayed box and dispatch
+      const [plain, usedEph] = this._open(box);
+      if (!plain) return;
+      let obj; try { obj = JSON.parse(S.to_string(plain)); } catch (e) { return; }
+      if (obj.kind === 'ekey') {
+        await this._onEkey(obj);
+      } else if (obj.kind === 'offer') {
         await this.pc.setRemoteDescription({ type: 'offer', sdp: obj.sdp });
         await this.pc.setLocalDescription(await this.pc.createAnswer());
         await gatherComplete(this.pc);
-        this.sig.sendTo(this.peerId, { kind: 'answer', sdp: this.pc.localDescription.sdp });
+        const [box2, eph] = this._seal({ kind: 'answer', sdp: this.pc.localDescription.sdp }, usedEph);
+        this.sessionFs = eph;                     // answer matches the offer's keying
+        this.sig.sendTo(this.peerId, box2);
       } else if (obj.kind === 'answer') {
+        this.sessionFs = usedEph;
         await this.pc.setRemoteDescription({ type: 'answer', sdp: obj.sdp });
       }
     }
@@ -251,7 +325,7 @@ const YAW = (() => {
         const bind = concat(enc(BIND_PREFIX), dtlsFp(this.pc.remoteDescription.sdp), dtlsFp(this.pc.localDescription.sdp));
         this.verified = m.id === this.peerId && Identity.verify(m.id, bind, S.from_hex(m.sig));
         this.caps = m.caps || [];
-        this.on('connected', { peer: this.peerId, verified: this.verified, nick: m.nick, caps: this.caps });
+        this.on('connected', { peer: this.peerId, verified: this.verified, nick: m.nick, caps: this.caps, fs: this.sessionFs });
       } else if (m.type === 'chat') this.on('chat', { peer: this.peerId, text: m.text });
       else if (m.type === 'browse') {
         const entries = this.share ? [...this.share.entries()].map(([name, f]) => ({ name, size: f.size })) : [];
@@ -338,6 +412,7 @@ const YAW = (() => {
       this.keyring = new Keyring();
       this.present = new Set();        // ids currently in the network
       this.nick = cleanNick(localStorage.getItem('yaw2_nick') || '');
+      this.fs = true;                  // yaw/2.1 forward-secret signaling (opportunistic)
     }
     setNick(nick) { this.nick = cleanNick(nick); localStorage.setItem('yaw2_nick', this.nick); return this.nick; }
     _trusted(pid) { return this.keyring.trusts(pid); }
@@ -358,7 +433,7 @@ const YAW = (() => {
     _newPeer(pid) {
       const old = this.peers[pid];
       if (old) { try { old.pc.close(); } catch (e) {} }
-      const p = new Peer(this.id, this.sig, pid, this.on, this.shared, this.nick);
+      const p = new Peer(this.id, this.sig, pid, this.on, this.shared, this.nick, this.fs);
       p.created = Date.now();
       this.peers[pid] = p; return p;
     }
@@ -374,14 +449,11 @@ const YAW = (() => {
       }
       await this._newPeer(pid).startOffer();
     }
-    async _onFrom(frm, obj) {
+    async _onFrom(frm, box) {
       if (!this._trusted(frm)) { this.on('untrusted', { peer: frm }); return; }
-      if (obj.kind === 'offer') {
-        const e = this.peers[frm];
-        await ((e && e.verified) ? e : this._newPeer(frm)).handleSignal(obj);
-      } else if (obj.kind === 'answer') {
-        const p = this.peers[frm]; if (p) await p.handleSignal(obj);
-      }
+      let peer = this.peers[frm];
+      if (!peer || peer.pc.connectionState === 'failed' || peer.pc.connectionState === 'closed') peer = this._newPeer(frm);
+      await peer.onBox(box);
     }
     async accept(id, nick) {
       const added = this.keyring.accept(id, nick);

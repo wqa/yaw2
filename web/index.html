@@ -184,7 +184,8 @@
     function onEvent(kind, kw) {
       if (kind === 'connected') {
         const hint = (!(node && node.keyring.name(kw.peer)) && kw.nick) ? ` (calls itself “${esc(kw.nick)}”)` : '';
-        line('sys', `+ ${label(kw.peer)} connected ${kw.verified ? '(identity verified ✓)' : '(UNVERIFIED!)'}${hint}`); refreshPeers();
+        const fs = kw.fs ? ' 🔒 forward-secret' : ' (not forward-secret)';
+        line('sys', `+ ${label(kw.peer)} connected ${kw.verified ? '(identity verified ✓)' : '(UNVERIFIED!)'}${fs}${hint}`); refreshPeers();
       }
       else if (kind === 'untrusted') {
         if (untrusted.has(kw.peer)) return; untrusted.add(kw.peer);
