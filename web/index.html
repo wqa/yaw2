@@ -62,7 +62,7 @@
       <button id="restorekey">Restore key</button>
       <input id="keyfile" type="file" accept=".yawkey,.json,application/json" style="display:none" />
     </div>
-    <div class="muted" style="font-size:.68rem; margin-top:.3rem">Your key lives in this browser. Back it up — clearing site data erases it.</div>
+    <div id="keynote" class="muted" style="font-size:.68rem; margin-top:.3rem">Your key lives in this browser. Back it up — clearing site data erases it.</div>
 
     <h3>Peers <span id="pcount" class="muted"></span></h3>
     <div id="peers"></div>
@@ -100,6 +100,8 @@
       const c = window.YAW_CONFIG || {};
       if (c.signalURL && !$('url').value) $('url').value = c.signalURL;
       if (c.defaultNet && !$('net').value) $('net').value = c.defaultNet;
+      if (YAW.inTauri) $('keynote').textContent =
+        'Your key is in the OS keychain — it survives clearing app data. A passphrase backup is still wise.';
     })();
 
     let node = null, ident = null;
