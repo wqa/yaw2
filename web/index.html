@@ -145,6 +145,7 @@
 
     let node = null, ident = null;
     const untrusted = new Set();
+    const connState = {};   // peer -> last logged status, so re-fires don't spam the log
     const label = (id) => { const n = node && node.keyring.name(id); return n ? esc(n) : short(id); };
     const myNick = () => node ? node.nick : YAW.cleanNick(localStorage.getItem('yaw2_nick') || '');
 
@@ -245,7 +246,14 @@
       if (kind === 'connected') {
         const hint = (!(node && node.keyring.name(kw.peer)) && kw.nick) ? ` (calls itself “${esc(kw.nick)}”)` : '';
         const fs = kw.fs ? ' 🔒 forward-secret' : ' (not forward-secret)';
-        line('sys', `+ ${label(kw.peer)} connected ${kw.verified ? '(identity verified ✓)' : '(UNVERIFIED!)'}${fs}${hint}`); refreshPeers();
+        const verdict = kw.verified ? '(identity verified ✓)'
+          : `(UNVERIFIED${kw.reason ? ': ' + esc(kw.reason) : ''}!)`;
+        const status = `${verdict}${fs}`;
+        if (connState[kw.peer] !== status) {     // only log genuine changes, not every re-fire
+          connState[kw.peer] = status;
+          line('sys', `+ ${label(kw.peer)} connected ${status}${hint}`);
+        }
+        refreshPeers();
       }
       else if (kind === 'untrusted') {
         if (untrusted.has(kw.peer)) return; untrusted.add(kw.peer);

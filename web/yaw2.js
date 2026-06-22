@@ -23,7 +23,11 @@ const YAW = (() => {
     return S.to_hex(S.crypto_hash_sha256(enc('yaw2-net:' + (name || ''))));
   }
   function dtlsFp(sdp) {
-    const m = /a=fingerprint:sha-256 ([0-9A-Fa-f:]+)/.exec(sdp || '');
+    // algorithm-agnostic: WebRTC stacks may advertise sha-256/sha-512/etc. Both peers
+    // see the same single fingerprint line per description, so binding over its hex is
+    // consistent regardless of the hash used. (sha-256-only matching left some stacks
+    // with an empty local fingerprint -> the identity bind could never verify.)
+    const m = /a=fingerprint:\S+\s+([0-9A-Fa-f:]+)/i.exec(sdp || '');
     return m ? S.from_hex(m[1].replace(/:/g, '').toLowerCase()) : new Uint8Array();
   }
   function concat(...arrs) {
@@ -344,10 +348,19 @@ const YAW = (() => {
     _onControl(data) {
       const m = JSON.parse(data);
       if (m.type === 'hello') {
-        const bind = concat(enc(BIND_PREFIX), dtlsFp(this.pc.remoteDescription.sdp), dtlsFp(this.pc.localDescription.sdp));
-        this.verified = m.id === this.peerId && Identity.verify(m.id, bind, S.from_hex(m.sig));
+        const rfp = dtlsFp(this.pc.remoteDescription && this.pc.remoteDescription.sdp);
+        const lfp = dtlsFp(this.pc.localDescription && this.pc.localDescription.sdp);
+        const bind = concat(enc(BIND_PREFIX), rfp, lfp);
+        let reason = '';
+        if (m.id !== this.peerId) reason = 'id mismatch';
+        else if (!rfp.length || !lfp.length) reason = 'missing DTLS fingerprint';
+        else if (!Identity.verify(m.id, bind, S.from_hex(m.sig))) reason = 'signature mismatch';
+        this.verified = !reason;
+        this.verifyReason = reason;
+        if (reason) try { console.warn('[yaw] hello unverified:', reason,
+          { rfpLen: rfp.length, lfpLen: lfp.length, idMatch: m.id === this.peerId }); } catch (e) {}
         this.caps = m.caps || [];
-        this.on('connected', { peer: this.peerId, verified: this.verified, nick: m.nick, caps: this.caps, fs: this.sessionFs });
+        this.on('connected', { peer: this.peerId, verified: this.verified, reason, nick: m.nick, caps: this.caps, fs: this.sessionFs });
       } else if (m.type === 'chat') this.on('chat', { peer: this.peerId, text: m.text });
       else if (m.type === 'browse') {
         const path = m.path || '';
@@ -470,9 +483,13 @@ const YAW = (() => {
       if (this.id.id >= pid) return;   // we answer; we don't offer
       const e = this.peers[pid];
       if (e) {
+        const open = e.dc && e.dc.readyState === 'open';
         const alive = e.pc.connectionState !== 'failed' && e.pc.connectionState !== 'closed';
         const fresh = Date.now() - (e.created || 0) < 12000;   // RETRY_AFTER
-        if (e.verified || (alive && fresh)) return;
+        // An OPEN control channel = negotiation succeeded; leave it even if unverified
+        // (re-offering the same identity/cert pair can't re-verify, it only churns the
+        // link and drops in-flight chat). Only re-offer a dead or still-stuck link.
+        if (e.verified || open || (alive && fresh)) return;
       }
       await this._newPeer(pid).startOffer();
     }

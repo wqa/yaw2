@@ -308,8 +308,13 @@ sig  = Ed25519_sign(bind, signing key)
   `prefix || own_fp || peer_fp`. The **verifier** reconstructs `prefix || sender_fp ||
   own_fp` (i.e. swaps the two, since the sender's `local` is the verifier's `remote`)
   and checks it against the sender's id.
-- The **DTLS fingerprint** is the 32-byte SHA-256 in the SDP line
-  `a=fingerprint:sha-256 F8:BF:28:…` — strip colons, lowercase, hex-decode to 32 bytes.
+- The **DTLS fingerprint** is the value of the SDP line
+  `a=fingerprint:<algo> F8:BF:28:…` — strip colons, lowercase, hex-decode to bytes.
+  Match the line **algorithm-agnostically** (`sha-256` is typical, but a stack MAY
+  advertise its cert under `sha-512` or another hash): there is exactly one fingerprint
+  line per description, so both peers extract the same value regardless of the hash. An
+  implementation MUST NOT hard-match `sha-256` only — doing so yields an empty local
+  fingerprint against such a stack and the bind can then never verify.
 - A peer MUST treat a session whose `hello` fails verification, or whose `id` ≠ the
   expected peer id, as **unauthenticated** (don't display it as verified).
 - `nick` (optional, §10) is a display label; `caps` (optional) advertises capabilities

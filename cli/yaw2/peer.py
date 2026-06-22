@@ -32,7 +32,9 @@ CHUNK = 64 * 1024
 
 
 def _dtls_fp(sdp: str) -> bytes:
-    m = re.search(r"a=fingerprint:sha-256 ([0-9A-Fa-f:]+)", sdp or "")
+    # algorithm-agnostic (sha-256/sha-512/…): both peers see the same single fingerprint
+    # line per description, so binding over its hex stays consistent across WebRTC stacks.
+    m = re.search(r"a=fingerprint:\S+\s+([0-9A-Fa-f:]+)", sdp or "", re.I)
     return bytes.fromhex(m.group(1).replace(":", "")) if m else b""
 
 
@@ -379,10 +381,15 @@ class Node:
             return  # we are the answerer; we only answer offers
         existing = self.peers.get(pid)
         if existing is not None:
+            open_ = existing.dc is not None and existing.dc.readyState == "open"
             alive = existing.pc.connectionState not in ("failed", "closed")
             fresh = time.monotonic() - getattr(existing, "created", 0) < self.RETRY_AFTER
-            if existing.verified or (alive and fresh):
-                return  # connected, or a young attempt still in flight — leave it
+            # An OPEN control channel means negotiation succeeded — leave it alone even if
+            # unverified: re-offering the same identity/cert pair can't change verification,
+            # it only churns the link (and drops in-flight chat). Only re-offer a link that
+            # is dead, or still stuck mid-negotiation past RETRY_AFTER.
+            if existing.verified or open_ or (alive and fresh):
+                return
         await self._new_peer(pid).start_offer()
 
     async def _on_join(self, pid, *_):

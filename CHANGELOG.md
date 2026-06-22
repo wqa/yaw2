@@ -4,6 +4,29 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-22 — The handshake that wouldn't take, and the storm it summoned
+On this day in 1948 the Empire Windrush docked at Tilbury and a great many people who
+*were* who they said they were spent years being treated as if unverified. On this day
+in 1633 (again) Galileo was made to sign something he didn't mean — here, a peer kept
+signing something the other side couldn't read, and so kept being waved away at the door.
+
+- **Fixed: a desktop/WebView peer was stuck UNVERIFIED forever, reconnecting in a loop.**
+  The identity bind (§10) signs over both DTLS fingerprints pulled from the SDP — but the
+  matcher only recognised `a=fingerprint:sha-256`. A WebRTC stack that advertises its own
+  cert under a different hash (e.g. `sha-512`) yielded an **empty local fingerprint**, so
+  the signed bind could never match and verification deterministically failed on the very
+  first connection. Fingerprint extraction is now **algorithm-agnostic** on web + CLI
+  (there's one fingerprint line per description, so both peers still agree). New
+  `cli/test_dtlsfp.py` pins it; `cli/test_share_live.py` still verifies sha-256 end-to-end.
+- **Fixed: an unverified-but-connected link was re-offered every ~12 s, forever.**
+  Verification is deterministic for a given identity+cert pair — retrying the *same* peer
+  can never change the result, it just tears down and rebuilds the channel (which is why a
+  typed message could vanish mid-storm). Both sides now treat an **open control channel as
+  settled** and only re-offer links that are actually dead or still stuck mid-negotiation.
+- **Clearer diagnosis:** an unverified `hello` now reports *why* (`id mismatch` / `missing
+  DTLS fingerprint` / `signature mismatch`) in the client log instead of a bare
+  "UNVERIFIED!", and the log no longer repeats an unchanged connection status.
+
 ### 2026-06-22 — Share the whole tree, walk it like a forest
 On this day in 1633 a Roman tribunal told a man what he could and couldn't point at;
 today we let you point at an entire directory and let friends wander every branch of
