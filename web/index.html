@@ -29,6 +29,14 @@
     .composer { display: flex; gap: .5rem; padding: .8rem; border-top: 1px solid #262b33; }
     .composer input { margin: 0; }
     a { color: #6fce96; }
+    #browse { position: fixed; right: 1rem; bottom: 5rem; width: 340px; max-height: 64vh;
+      overflow: auto; background: #14171c; border: 1px solid #2b313a; border-radius: 10px;
+      padding: .5rem .6rem; font-size: .82rem; box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 50; }
+    #browse .bhd { font-weight: 600; margin-bottom: .35rem; border-bottom: 1px solid #262b33; padding-bottom: .3rem; }
+    #browse .brow { padding: .12rem .1rem; display: flex; align-items: center; gap: .35rem; }
+    #browse .brow:hover { background: #1c1f24; border-radius: 5px; }
+    #browse .brow a { cursor: pointer; text-decoration: none; }
+    #browse .bx { float: right; font-size: .7rem; padding: 0 .35rem; }
   </style>
 </head>
 <body>
@@ -69,7 +77,9 @@
 
     <h3>Files</h3>
     <input id="file" type="file" multiple />
-    <button id="addshare">Add to my share</button>
+    <button id="addshare">Add files</button>
+    <button id="addfolder">Add a folder</button>
+    <input id="folder" type="file" webkitdirectory style="display:none" />
     <button id="sendfile">Send now to all</button>
     <div id="sharecount" class="muted" style="font-size:.78rem; margin-top:.3rem"></div>
   </aside>
@@ -81,6 +91,8 @@
       <button type="submit">Send</button>
     </form>
   </main>
+
+  <div id="browse" style="display:none"></div>
 
   <script src="config.js"></script><!-- deployment config (gitignored); see config.example.js -->
   <script src="vendor/sodium.bundle.js"></script>
@@ -182,6 +194,53 @@
       }
     }
 
+    function fmtSize(n) {
+      if (n < 1024) return n + ' B';
+      if (n < (1 << 20)) return (n / 1024).toFixed(1) + ' KB';
+      if (n < (1 << 30)) return (n / (1 << 20)).toFixed(1) + ' MB';
+      return (n / (1 << 30)).toFixed(2) + ' GB';
+    }
+
+    // Filesystem-like browse panel: dirs are clickable (descend), files have a get
+    // button, and an "up" row climbs back. Each navigation just re-requests browse.
+    function renderBrowse(peer, path, entries) {
+      const panel = $('browse');
+      const go = (pp) => { const p = node.peers[peer]; if (p) p.requestBrowse(pp); };
+      panel.style.display = 'block';
+      panel.innerHTML = '';
+      const hd = document.createElement('div'); hd.className = 'bhd';
+      hd.innerHTML = `📂 ${esc(label(peer))} <span class="mono muted">/${esc(path)}</span>`;
+      const x = document.createElement('button'); x.textContent = '✕'; x.className = 'bx';
+      x.onclick = () => { panel.style.display = 'none'; };
+      hd.appendChild(x); panel.appendChild(hd);
+      if (path) {
+        const up = document.createElement('div'); up.className = 'brow';
+        const a = document.createElement('a'); a.textContent = '⬆️  .. (up)';
+        a.onclick = () => go(path.split('/').slice(0, -1).join('/'));
+        up.appendChild(a); panel.appendChild(up);
+      }
+      if (!entries.length) {
+        const e = document.createElement('div'); e.className = 'brow muted'; e.textContent = '(empty)';
+        panel.appendChild(e);
+      }
+      for (const e of entries) {
+        const row = document.createElement('div'); row.className = 'brow';
+        const rel = path ? path + '/' + e.name : e.name;
+        if (e.dir) {
+          const a = document.createElement('a'); a.textContent = '📁  ' + e.name + '/';
+          a.onclick = () => go(rel);
+          row.appendChild(a);
+        } else {
+          const n = document.createElement('span'); n.innerHTML = `📄  ${esc(e.name)} <span class="muted">${fmtSize(e.size)}</span> `;
+          const b = document.createElement('button'); b.textContent = 'get';
+          b.style.cssText = 'font-size:.7rem;padding:.05rem .4rem;margin-left:auto';
+          b.onclick = () => { const p = node.peers[peer]; if (p) p.requestGet(rel); };
+          row.appendChild(n); row.appendChild(b);
+        }
+        panel.appendChild(row);
+      }
+    }
+
     function onEvent(kind, kw) {
       if (kind === 'connected') {
         const hint = (!(node && node.keyring.name(kw.peer)) && kw.nick) ? ` (calls itself “${esc(kw.nick)}”)` : '';
@@ -210,18 +269,7 @@
       else if (kind === 'signaling') { line('sys', `signaling ${kw.state} (${kw.peers} peer(s) present)`); refreshPeers(); }
       else if (kind === 'peer-leave') { line('sys', `- ${label(kw.peer)} left`); refreshPeers(); }
       else if (kind === 'chat') line('', `<b>${label(kw.peer)}</b>: ${esc(kw.text)}`);
-      else if (kind === 'files') {
-        if (!kw.entries.length) { line('sys', `${label(kw.peer)} shares nothing`); return; }
-        line('sys', `${label(kw.peer)} shares:`);
-        for (const e of kw.entries) {
-          const d = document.createElement('div'); d.className = 'line';
-          d.innerHTML = `&nbsp;&nbsp;${esc(e.name)} <span class="muted">${e.size} B</span> `;
-          const b = document.createElement('button');
-          b.textContent = 'get'; b.style.cssText = 'font-size:.7rem;padding:.05rem .4rem';
-          b.onclick = () => { const p = node.peers[kw.peer]; if (p) p.requestGet(e.name); };
-          d.appendChild(b); log.appendChild(d); log.scrollTop = log.scrollHeight;
-        }
-      }
+      else if (kind === 'files') renderBrowse(kw.peer, kw.path || '', kw.entries);
       else if (kind === 'no-file') line('sys', `${label(kw.peer)} has no “${esc(kw.name)}”`);
       else if (kind === 'file-incoming') line('sys', `incoming file “${esc(kw.name)}” (${kw.size} B) from ${label(kw.peer)}…`);
       else if (kind === 'file-recv') {
@@ -325,13 +373,31 @@
       $('keyfile').value = '';
     };
 
+    function shareCount() {
+      $('sharecount').textContent = node && node.shared.size
+        ? `sharing ${node.shared.size} item(s) — peers can browse you`
+        : '';
+    }
+    // share keys are relative paths: plain filename for loose files, or the
+    // folder-relative path (webkitRelativePath) so a whole tree stays navigable.
     $('addshare').onclick = () => {
       if (!node || !$('file').files.length) return;
       for (const f of $('file').files) node.shared.set(f.name, f);
-      $('sharecount').textContent = node.shared.size
-        ? `sharing ${node.shared.size} file(s) — peers can browse you`
-        : '';
+      shareCount();
       line('sys', `added ${$('file').files.length} file(s) to your share`);
+    };
+    $('addfolder').onclick = () => $('folder').click();
+    $('folder').onchange = () => {
+      if (!node || !$('folder').files.length) return;
+      let top = '';
+      for (const f of $('folder').files) {
+        const rel = f.webkitRelativePath || f.name;
+        node.shared.set(rel, f);
+        if (!top) top = rel.split('/')[0];
+      }
+      shareCount();
+      line('sys', `added folder “${esc(top)}” (${$('folder').files.length} file(s)) — peers can browse it as a tree`);
+      $('folder').value = '';
     };
 
     $('sendfile').onclick = async () => {

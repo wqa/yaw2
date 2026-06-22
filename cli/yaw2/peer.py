@@ -238,16 +238,19 @@ class YawPeer:
         elif t == "chat":
             self.on_event("chat", peer=self.peer_id, text=m.get("text", ""))
         elif t == "browse":
-            entries = self.share.listing() if self.share else []
-            self._dc({"type": "files", "entries": entries})
+            path = m.get("path", "")
+            entries = self.share.listing(path) if self.share else []
+            self._dc({"type": "files", "path": path, "entries": entries})
         elif t == "files":
-            self.on_event("files", peer=self.peer_id, entries=m.get("entries", []))
+            self.on_event("files", peer=self.peer_id, path=m.get("path", ""),
+                          entries=m.get("entries", []))
         elif t == "get":
-            data = self.share.read(m.get("name", "")) if self.share else None
+            name = m.get("name", "")
+            data = self.share.read(name) if self.share else None
             if data is None:
-                self._dc({"type": "no-file", "name": m.get("name", "")})
+                self._dc({"type": "no-file", "name": name})
             else:
-                self.send_file(m["name"], data)
+                self.send_file(os.path.basename(name), data)  # offer with a clean filename
         elif t == "no-file":
             self.on_event("no-file", peer=self.peer_id, name=m.get("name", ""))
         elif t == "file-offer":
@@ -281,8 +284,8 @@ class YawPeer:
     def send_chat(self, text: str):
         self._dc({"type": "chat", "text": text})
 
-    def request_browse(self):
-        self._dc({"type": "browse"})
+    def request_browse(self, path: str = ""):
+        self._dc({"type": "browse", "path": path})
 
     def request_get(self, name: str):
         self._dc({"type": "get", "name": name})

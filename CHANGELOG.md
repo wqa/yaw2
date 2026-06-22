@@ -4,6 +4,26 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-22 — Share the whole tree, walk it like a forest
+On this day in 1633 a Roman tribunal told a man what he could and couldn't point at;
+today we let you point at an entire directory and let friends wander every branch of
+it. On this day in 1969 a river caught fire in Cleveland — proof that a *flat* surface
+can still hide a lot underneath. Now nothing hides: subfolders and all.
+
+- **Share a whole directory, browse it like a filesystem.** The shared folder is no
+  longer a flat single level — a peer can host an entire **tree**, and a visitor walks
+  it: click into a 📁 folder, climb back with `.. (up)`, `get` any file. The browse
+  protocol gained a `path` (which level) and `dir`-flagged entries (folders vs files);
+  fully additive — `caps:["share"]` peers that only spoke the flat dialect still work.
+- **Hosts:** the CLI/Tauri peer shares any on-disk tree (`--share DIR`); the web client
+  gained **Add a folder** (picks a directory, keeps its structure) alongside **Add
+  files**. The web keys its share by each file's relative path so the tree survives.
+- **Traversal safety, hardened.** One `_resolve()` choke point: reject absolute paths,
+  `..`, and dotfiles; resolve the real path (symlinks and all) and refuse anything that
+  escapes the share root. `cli/test_fileshare.py` throws `../`, absolute, backslash, and
+  symlink-escape attacks at it; `cli/test_share_live.py` now descends a real subfolder
+  and pulls a nested file over production infra, hash-verified.
+
 ### 2026-06-22 — A tale of two channels
 The herald and the wagon took different roads, and the herald kept arriving first.
 

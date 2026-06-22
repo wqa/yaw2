@@ -44,8 +44,12 @@ it to your friends however you like (chat, email, etc.).
 
 - **Chat:** type in the box at the bottom.
 - **Send a file now:** choose file(s), then **Send now to all**.
-- **Share a folder to browse:** choose files, then **Add to my share**. Friends click
-  **browse** next to your name, then **get** to download what they want.
+- **Share files to browse:** choose file(s), then **Add files**.
+- **Share a whole folder:** click **Add a folder** and pick a directory — its
+  subfolders come along. Friends can browse the whole tree.
+- **Browse a friend:** click **browse** next to their name. A panel opens; click a
+  **📁 folder** to go in, **.. (up)** to go back, and **get** to download a file.
+  Everything transfers directly between the two of you, end-to-end encrypted.
 
 ## 7. Back up your key — do this once, now
 

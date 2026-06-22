@@ -324,8 +324,23 @@ const YAW = (() => {
       const caps = (this.share && this.share.size) ? ['share'] : [];
       this._dc({ type: 'hello', id: this.id.id, nick: this.nick, caps, sig: S.to_hex(this.id.sign(bind)) });
     }
-    requestBrowse() { this._dc({ type: 'browse' }); }
+    requestBrowse(path = '') { this._dc({ type: 'browse', path }); }
     requestGet(name) { this._dc({ type: 'get', name }); }
+    _listShare(path) {
+      // immediate children at `path`, derived from the relpath-keyed share map
+      if (!this.share) return [];
+      const prefix = path ? path.replace(/^\/+|\/+$/g, '') + '/' : '';
+      const dirs = new Set(), files = [];
+      for (const [rel, f] of this.share) {
+        if (prefix && !rel.startsWith(prefix)) continue;
+        const rest = rel.slice(prefix.length);
+        const i = rest.indexOf('/');
+        if (i === -1) { if (rest) files.push({ name: rest, size: f.size }); }
+        else dirs.add(rest.slice(0, i));
+      }
+      return [...dirs].sort().map((d) => ({ name: d, dir: true }))
+        .concat(files.sort((a, b) => (a.name < b.name ? -1 : 1)));
+    }
     _onControl(data) {
       const m = JSON.parse(data);
       if (m.type === 'hello') {
@@ -335,9 +350,9 @@ const YAW = (() => {
         this.on('connected', { peer: this.peerId, verified: this.verified, nick: m.nick, caps: this.caps, fs: this.sessionFs });
       } else if (m.type === 'chat') this.on('chat', { peer: this.peerId, text: m.text });
       else if (m.type === 'browse') {
-        const entries = this.share ? [...this.share.entries()].map(([name, f]) => ({ name, size: f.size })) : [];
-        this._dc({ type: 'files', entries });
-      } else if (m.type === 'files') this.on('files', { peer: this.peerId, entries: m.entries || [] });
+        const path = m.path || '';
+        this._dc({ type: 'files', path, entries: this._listShare(path) });
+      } else if (m.type === 'files') this.on('files', { peer: this.peerId, path: m.path || '', entries: m.entries || [] });
       else if (m.type === 'get') {
         const f = this.share && this.share.get(m.name);
         if (!f) this._dc({ type: 'no-file', name: m.name });

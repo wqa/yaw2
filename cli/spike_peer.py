@@ -127,9 +127,15 @@ async def main():
             print(f"<{label(kw['peer'])}> {kw['text']}")
         elif kind == "files":
             entries = kw["entries"]
-            print(f"[files] {label(kw['peer'])} shares {len(entries)} file(s):")
+            path = kw.get("path", "")
+            print(f"[files] {label(kw['peer'])}:/{path}  ({len(entries)} entr"
+                  f"{'y' if len(entries) == 1 else 'ies'})")
             for e in entries:
-                print(f"    {e['name']:<32} {e['size']:>12,} B")
+                if e.get("dir"):
+                    print(f"    [DIR]   {e['name']}/")
+                else:
+                    print(f"            {e['name']:<30} {e['size']:>12,} B")
+            print("    /browse <id> <path>  enter a folder · /get <id> <path>  fetch a file")
         elif kind == "no-file":
             print(f"[files] {label(kw['peer'])} has no '{kw['name']}'")
         elif kind == "file-recv":
@@ -176,8 +182,8 @@ async def main():
                   "  /import <file>            restore identity from a key backup (then restart)\n"
                   "  /peers                    list connected peers\n"
                   "  /share                    list files you share\n"
-                  "  /browse <id-prefix>       list a peer's shared files\n"
-                  "  /get <id-prefix> <name>   download a file from a peer\n"
+                  "  /browse <id> [path]       list a peer's folder (path enters subdirs)\n"
+                  "  /get <id> <path>          download a file (path within their share)\n"
                   "  <text>                    chat to all peers")
         elif cmd == "/me":
             print(f"  {make_card(ident.id, node.nick)}")
@@ -245,18 +251,25 @@ async def main():
                 print(f"  {label(pid):<16}  {pid[:12]}…  verified={p.verified}  "
                       f"{'shares' if 'share' in caps else ''}")
         elif cmd == "/share":
+            sub = " ".join(parts[1:]) if len(parts) > 1 else ""
             if node.share:
-                listing = node.share.listing()
+                listing = node.share.listing(sub)
+                print(f"  sharing {share_dir}:/{sub}")
                 for e in listing:
-                    print(f"  {e['name']:<32} {e['size']:>12,} B")
+                    if e.get("dir"):
+                        print(f"    [DIR]   {e['name']}/")
+                    else:
+                        print(f"            {e['name']:<30} {e['size']:>12,} B")
                 if not listing:
-                    print(f"  (share dir empty: {share_dir})")
+                    print(f"    (empty)")
         elif cmd == "/browse" and len(parts) >= 2:
             pid = resolve(parts[1])
-            (node.peers[pid].request_browse() if pid else print("  no single peer matches"))
+            path = " ".join(parts[2:]) if len(parts) > 2 else ""
+            (node.peers[pid].request_browse(path) if pid else print("  no single peer matches"))
         elif cmd == "/get" and len(parts) >= 3:
             pid = resolve(parts[1])
-            (node.peers[pid].request_get(parts[2]) if pid else print("  no single peer matches"))
+            name = " ".join(parts[2:])
+            (node.peers[pid].request_get(name) if pid else print("  no single peer matches"))
         else:
             print("  ? /help")
 
