@@ -215,8 +215,8 @@ class YawPeer:
             print(f"[dbg {self.id.id[:4]}] dc OPEN -> sending hello (offerer={self.id.id < self.peer_id})")
         bind = BIND_PREFIX + _dtls_fp(self.pc.localDescription.sdp) + _dtls_fp(self.pc.remoteDescription.sdp)
         caps = ["share"] if self.share else []
-        self.dc.send(json.dumps({"type": "hello", "id": self.id.id, "nick": self.nick,
-                                 "caps": caps, "sig": self.id.sign(bind).hex()}))
+        self._dc({"type": "hello", "id": self.id.id, "nick": self.nick,
+                  "caps": caps, "sig": self.id.sign(bind).hex()})
 
     async def _on_control(self, message):
         try:
@@ -239,13 +239,13 @@ class YawPeer:
             self.on_event("chat", peer=self.peer_id, text=m.get("text", ""))
         elif t == "browse":
             entries = self.share.listing() if self.share else []
-            self.dc.send(json.dumps({"type": "files", "entries": entries}))
+            self._dc({"type": "files", "entries": entries})
         elif t == "files":
             self.on_event("files", peer=self.peer_id, entries=m.get("entries", []))
         elif t == "get":
             data = self.share.read(m.get("name", "")) if self.share else None
             if data is None:
-                self.dc.send(json.dumps({"type": "no-file", "name": m.get("name", "")}))
+                self._dc({"type": "no-file", "name": m.get("name", "")})
             else:
                 self.send_file(m["name"], data)
         elif t == "no-file":
@@ -253,7 +253,7 @@ class YawPeer:
         elif t == "file-offer":
             self._recv[m["xid"]] = {"name": m["name"], "size": m["size"],
                                     "sha": m["sha256"], "buf": bytearray(), "done": False}
-            self.dc.send(json.dumps({"type": "file-accept", "xid": m["xid"]}))
+            self._dc({"type": "file-accept", "xid": m["xid"]})
         elif t == "file-accept":
             asyncio.ensure_future(self._stream_file(m["xid"]))
         elif t == "file-done":
@@ -273,23 +273,25 @@ class YawPeer:
                       size=len(st["buf"]), ok=ok, data=bytes(st["buf"]))
 
     # -- application API -------------------------------------------------------
+    def _dc(self, obj):
+        # guard: aiortc raises if the channel isn't 'open' (e.g. a failed peer)
+        if self.dc is not None and self.dc.readyState == "open":
+            self.dc.send(json.dumps(obj))
+
     def send_chat(self, text: str):
-        if self.dc:
-            self.dc.send(json.dumps({"type": "chat", "text": text}))
+        self._dc({"type": "chat", "text": text})
 
     def request_browse(self):
-        if self.dc:
-            self.dc.send(json.dumps({"type": "browse"}))
+        self._dc({"type": "browse"})
 
     def request_get(self, name: str):
-        if self.dc:
-            self.dc.send(json.dumps({"type": "get", "name": name}))
+        self._dc({"type": "get", "name": name})
 
     def send_file(self, name: str, data: bytes):
         xid = os.urandom(8).hex()
         self._send[xid] = data
-        self.dc.send(json.dumps({"type": "file-offer", "xid": xid, "name": name,
-                                 "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}))
+        self._dc({"type": "file-offer", "xid": xid, "name": name,
+                  "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
 
     async def _stream_file(self, xid: str):
         data = self._send.pop(xid, None)
@@ -303,8 +305,8 @@ class YawPeer:
             while ch.bufferedAmount > (1 << 20):
                 await asyncio.sleep(0.01)
             ch.send(data[i:i + CHUNK])
-        self.dc.send(json.dumps({"type": "file-done", "xid": xid,
-                                 "sha256": hashlib.sha256(data).hexdigest()}))
+        self._dc({"type": "file-done", "xid": xid,
+                  "sha256": hashlib.sha256(data).hexdigest()})
 
 
 class Node:

@@ -322,10 +322,10 @@ const YAW = (() => {
     _sendHello() {
       const bind = concat(enc(BIND_PREFIX), dtlsFp(this.pc.localDescription.sdp), dtlsFp(this.pc.remoteDescription.sdp));
       const caps = (this.share && this.share.size) ? ['share'] : [];
-      this.dc.send(JSON.stringify({ type: 'hello', id: this.id.id, nick: this.nick, caps, sig: S.to_hex(this.id.sign(bind)) }));
+      this._dc({ type: 'hello', id: this.id.id, nick: this.nick, caps, sig: S.to_hex(this.id.sign(bind)) });
     }
-    requestBrowse() { if (this.dc) this.dc.send(JSON.stringify({ type: 'browse' })); }
-    requestGet(name) { if (this.dc) this.dc.send(JSON.stringify({ type: 'get', name })); }
+    requestBrowse() { this._dc({ type: 'browse' }); }
+    requestGet(name) { this._dc({ type: 'get', name }); }
     _onControl(data) {
       const m = JSON.parse(data);
       if (m.type === 'hello') {
@@ -336,16 +336,16 @@ const YAW = (() => {
       } else if (m.type === 'chat') this.on('chat', { peer: this.peerId, text: m.text });
       else if (m.type === 'browse') {
         const entries = this.share ? [...this.share.entries()].map(([name, f]) => ({ name, size: f.size })) : [];
-        this.dc.send(JSON.stringify({ type: 'files', entries }));
+        this._dc({ type: 'files', entries });
       } else if (m.type === 'files') this.on('files', { peer: this.peerId, entries: m.entries || [] });
       else if (m.type === 'get') {
         const f = this.share && this.share.get(m.name);
-        if (!f) this.dc.send(JSON.stringify({ type: 'no-file', name: m.name }));
+        if (!f) this._dc({ type: 'no-file', name: m.name });
         else this.sendFile(f);
       } else if (m.type === 'no-file') this.on('no-file', { peer: this.peerId, name: m.name });
       else if (m.type === 'file-offer') {
         this._recv[m.xid] = { name: m.name, size: m.size, sha: m.sha256, buf: [], have: 0, done: false };
-        this.dc.send(JSON.stringify({ type: 'file-accept', xid: m.xid }));
+        this._dc({ type: 'file-accept', xid: m.xid });
         this.on('file-incoming', { peer: this.peerId, name: m.name, size: m.size });
       } else if (m.type === 'file-accept') this._stream(m.xid);
       else if (m.type === 'file-done') {
@@ -363,13 +363,14 @@ const YAW = (() => {
         this.on('file-recv', { peer: this.peerId, name: st.name, size: ab.byteLength, ok, blob });
       });
     }
-    sendChat(text) { if (this.dc) this.dc.send(JSON.stringify({ type: 'chat', text })); }
+    _dc(obj) { if (this.dc && this.dc.readyState === 'open') this.dc.send(JSON.stringify(obj)); }
+    sendChat(text) { this._dc({ type: 'chat', text }); }
     async sendFile(file) {
       const data = new Uint8Array(await file.arrayBuffer());
       const xid = S.to_hex(S.randombytes_buf(8));
       this._send[xid] = data;
-      this.dc.send(JSON.stringify({ type: 'file-offer', xid, name: file.name, size: data.length,
-        sha256: S.to_hex(S.crypto_hash_sha256(data)) }));
+      this._dc({ type: 'file-offer', xid, name: file.name, size: data.length,
+        sha256: S.to_hex(S.crypto_hash_sha256(data)) });
     }
     async _stream(xid) {
       const data = this._send[xid]; delete this._send[xid]; if (!data) return;
@@ -379,7 +380,7 @@ const YAW = (() => {
         while (ch.bufferedAmount > (1 << 20)) await new Promise((r) => setTimeout(r, 10));
         ch.send(data.slice(i, i + CHUNK));
       }
-      this.dc.send(JSON.stringify({ type: 'file-done', xid, sha256: S.to_hex(S.crypto_hash_sha256(data)) }));
+      this._dc({ type: 'file-done', xid, sha256: S.to_hex(S.crypto_hash_sha256(data)) });
     }
   }
 
