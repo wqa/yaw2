@@ -38,7 +38,7 @@ def _dtls_fp(sdp: str) -> bytes:
 
 class YawPeer:
     def __init__(self, identity: Identity, signaling: Signaling, peer_id: str, on_event,
-                 share=None, nick="", fs=True):
+                 share=None, nick="", fs=True, require_fs=False):
         self.id = identity
         self.sig = signaling
         self.peer_id = peer_id
@@ -53,6 +53,7 @@ class YawPeer:
 
         # yaw/2.1 forward-secret signaling: per-session ephemeral X25519 (§3'/§6').
         self.fs = fs                                  # are we willing to do FS?
+        self.require_fs = require_fs                  # refuse non-FS (2.0) sessions (§6.1)
         self._esk = PrivateKey.generate() if fs else None
         self._epk = self._esk.public_key if fs else None
         self.peer_epk = None                          # peer's ephemeral pubkey, once known
@@ -137,6 +138,11 @@ class YawPeer:
     async def _do_offer(self):
         if self._offered:
             return
+        if self.require_fs and self.peer_epk is None:        # peer gave no ekey -> 2.0
+            self._offer_pending = False
+            self.on_event("fs-refused", peer=self.peer_id)
+            asyncio.ensure_future(self.pc.close())
+            return
         self._offered = True
         self._offer_pending = False
         self.dc = self.pc.createDataChannel("yaw")
@@ -159,6 +165,10 @@ class YawPeer:
         if kind == "ekey":
             await self._on_ekey(obj)
         elif kind == "offer":
+            if self.require_fs and not used_eph:             # static offer == 2.0 peer
+                self.on_event("fs-refused", peer=self.peer_id)
+                asyncio.ensure_future(self.pc.close())
+                return
             await self.pc.setRemoteDescription(RTCSessionDescription(obj["sdp"], "offer"))
             await self.pc.setLocalDescription(await self.pc.createAnswer())
             box2, eph = self._seal({"kind": "answer", "sdp": self.pc.localDescription.sdp},
@@ -166,6 +176,10 @@ class YawPeer:
             self.session_fs = eph
             await self.sig.send_to(self.peer_id, box2)
         elif kind == "answer":
+            if self.require_fs and not used_eph:
+                self.on_event("fs-refused", peer=self.peer_id)
+                asyncio.ensure_future(self.pc.close())
+                return
             self.session_fs = used_eph
             await self.pc.setRemoteDescription(RTCSessionDescription(obj["sdp"], "answer"))
 
@@ -297,7 +311,8 @@ class Node:
     RETRY_AFTER = 12    # re-offer a link that hasn't verified within this many seconds
 
     def __init__(self, url: str, identity: Identity, net: str, on_event,
-                 share_dir=None, keyring=None, nick="", forward_secret=True):
+                 share_dir=None, keyring=None, nick="", forward_secret=True,
+                 require_fs=False):
         self.id = identity
         self.net = net
         self.on_event = on_event
@@ -307,6 +322,7 @@ class Node:
         self.keyring = keyring
         self.nick = nick
         self.fs = forward_secret        # yaw/2.1 forward-secret signaling (opportunistic)
+        self.require_fs = require_fs    # the "switch": refuse non-FS (2.0) sessions
 
     def _trusted(self, pid: str) -> bool:
         return self.keyring is None or self.keyring.trusts(pid)
@@ -332,7 +348,7 @@ class Node:
             except Exception:
                 pass
         peer = YawPeer(self.id, self.sig, pid, self.on_event, share=self.share,
-                       nick=self.nick, fs=self.fs)
+                       nick=self.nick, fs=self.fs, require_fs=self.require_fs)
         peer.created = time.monotonic()
         self.peers[pid] = peer
         return peer
