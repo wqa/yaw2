@@ -5,6 +5,13 @@ using WebRTC DataChannels for transport, ICE/STUN for NAT traversal, and Ed25519
 identities. A lightweight server (the **anchor**) does signaling + STUN and never
 carries user data.
 
+## Implementing a client — start here
+
+**[yaw2-implementation.md](yaw2-implementation.md)** is the complete, self-contained
+specification: every message, byte layout, and crypto step with **reproducible test
+vectors** (`cli/protocol_vectors.py`). It covers `yaw/2.0` + `yaw/2.1` end to end — an
+external implementor should be able to follow it without asking questions.
+
 ## Wire versions
 
 | Doc | Version | Status | What it is |
