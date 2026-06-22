@@ -35,6 +35,16 @@ web/CLI code; this is just a shell.
 
 ## Build / run
 
+Easiest — `run.sh` sources Cargo itself, so it works from any terminal (no
+`cargo: command not found` if rustup's PATH line didn't load):
+
+```sh
+desktop/run.sh           # dev window   (cargo tauri dev)
+desktop/run.sh build     # release bundle (cargo tauri build)
+```
+
+Or directly (needs cargo on PATH — `source "$HOME/.cargo/env"` if it isn't):
+
 ```sh
 cd desktop/src-tauri
 cargo tauri icon ../app-icon.png   # once — generates icons/ (REQUIRED; the build
