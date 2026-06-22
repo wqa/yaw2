@@ -21,6 +21,9 @@
     .dl b { display: block; font-size: 1.02rem; margin-bottom: .15rem; }
     .dl span { color: #8b94a3; font-size: .84rem; }
     .soon { opacity: .65; }
+    .ver { display: inline-block; font-size: .68rem; color: #6fce96; border: 1px solid #2f4a3b;
+      border-radius: 999px; padding: .02rem .45rem; margin-left: .4rem; vertical-align: middle; }
+    .proto { text-align: center; font-size: .8rem; color: #8b94a3; margin: -.8rem 0 1.4rem; }
     .note { margin-top: 1.6rem; font-size: .82rem; color: #79818f; text-align: center; }
   </style>
 </head>
@@ -29,16 +32,18 @@
     <h1>YAW<span class="dot">.</span></h1>
     <p class="sub">A small, private, end-to-end-encrypted mesh — chat &amp; file sharing,
       peer-to-peer. The server only introduces you; it never sees your messages.</p>
+    <p class="proto">All clients speak protocol <b>yaw/2.1</b> — forward-secret
+      signaling, interoperable with <b>yaw/2.0</b>.</p>
 
     <div class="dl">
-      <b>🌐 Web client — recommended, nothing to install</b>
+      <b>🌐 Web client — recommended, nothing to install<span class="ver">yaw/2.1</span></b>
       <span>Open the link your host shared with you in any modern browser (Chrome,
       Safari, Firefox, Edge), sign in, and follow the in-app guide. Your key stays
       in your browser.</span>
     </div>
 
     <a class="dl" href="https://github.com/wqa/yaw2">
-      <b>⌨︎ Command-line client</b>
+      <b>⌨︎ Command-line client<span class="ver">yaw/2.1</span></b>
       <span>Python (aiortc + libsodium). Source &amp; setup at github.com/wqa/yaw2 —
       needs Python 3.9+. Same network, same contact cards as the web client.</span>
     </a>

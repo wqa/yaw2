@@ -19,7 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from yaw2 import Identity, Keyring, Node, net_hash, make_card, parse_card
+from yaw2 import Identity, Keyring, Node, net_hash, make_card, parse_card, PROTO
 from yaw2.keybackup import encrypt_seed, decrypt_seed
 from yaw2.keyring import clean_nick
 from yaw2.config import signal_url, default_net
@@ -138,6 +138,7 @@ async def main():
                 fh.write(kw["data"])
             print(f"[file] '{kw['name']}' ({kw['size']:,} B) ok={kw['ok']} -> {path}")
 
+    print(f"[cli peer] protocol {PROTO}  (forward-secret; interoperates with yaw/2.0)")
     print(f"[cli peer] you are {my_nick or '(no nick — set one with /nick)'}")
     print(f"[cli peer] your card: {make_card(ident.id, my_nick)}")
     print(f"[cli peer] net '{netname}'  sharing {share_dir}  trusting {len(kr.all())} contact(s)")

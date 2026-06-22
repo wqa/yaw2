@@ -6,6 +6,7 @@ const YAW = (() => {
   let S = null; // libsodium, after ready
   const STUN = (typeof window !== 'undefined' && window.YAW_CONFIG && window.YAW_CONFIG.stunURL)
     || 'stun:your-anchor.example:3478';   // real value comes from config.js (gitignored)
+  const PROTO = 'yaw/2.1';              // protocol this client speaks (2.0-compatible)
   const BIND_PREFIX = 'yaw/2 bind';
   const EKEY_PREFIX = 'yaw/2.1 ekey';   // signed context for the ephemeral-key message
   const FS_TIMEOUT = 2000;              // wait for peer's ekey before 2.0 fallback (ms)
@@ -464,5 +465,5 @@ const YAW = (() => {
     forget(id) { return this.keyring.remove(id); }
   }
 
-  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick, diagnose, inTauri };
+  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick, diagnose, inTauri, PROTO };
 })();

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>YAW/2 — web client (spike)</title>
+  <title>YAW — web client</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -33,7 +33,7 @@
 </head>
 <body>
   <aside>
-    <h1>YAW/2 <span class="muted" style="font-size:.7rem">spike</span></h1>
+    <h1>YAW <span id="proto" class="muted" style="font-size:.7rem" title="protocol version (forward-secret; interoperates with yaw/2.0)"></span></h1>
     <div id="me" class="mono muted" style="font-size:.75rem; word-break:break-all"></div>
 
     <h3>Join</h3>
@@ -126,6 +126,7 @@
       const c = window.YAW_CONFIG || {};
       if (c.signalURL && !$('url').value) $('url').value = c.signalURL;
       if (c.defaultNet && !$('net').value) $('net').value = c.defaultNet;
+      $('proto').textContent = YAW.PROTO;
       if (YAW.inTauri) $('keynote').textContent =
         'Your key is in the OS keychain — it survives clearing app data. A passphrase backup is still wise.';
     })();
