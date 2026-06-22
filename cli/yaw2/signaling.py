@@ -32,8 +32,9 @@ class Signaling:
         self.peers = set(joined.get("peers", []))
         return self.peers
 
-    async def send_to(self, to_id: str, obj: dict):
-        box = self.id.seal(to_id, json.dumps(obj).encode())
+    async def send_to(self, to_id: str, box: str):
+        # `box` is already a sealed payload (the Node/peer chooses static vs ephemeral
+        # keying — yaw/2.1 §5.4'). The server only ever sees this opaque blob.
         await self.ws.send(json.dumps({"type": "to", "to": to_id, "box": box}))
 
     async def run(self, on_from, on_join, on_leave, on_reconnect=None):
@@ -50,11 +51,9 @@ class Signaling:
                     m = json.loads(raw)
                     t = m.get("type")
                     if t == "from":
-                        try:
-                            plain = self.id.open(m["from"], m["box"])
-                            await on_from(m["from"], json.loads(plain))
-                        except Exception:
-                            pass  # undecryptable / malformed -> ignore
+                        # deliver the raw sealed box; the Node/peer opens it (it owns
+                        # the static + ephemeral keys, yaw/2.1 §5.4')
+                        await on_from(m["from"], m["box"])
                     elif t == "peer-join":
                         self.peers.add(m["id"]); await on_join(m["id"])
                     elif t == "peer-leave":

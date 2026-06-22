@@ -8,6 +8,7 @@ the `yaw` control channel; files ride a dedicated `f:<xid>` channel.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ import time
 
 from aiortc import (RTCPeerConnection, RTCConfiguration, RTCIceServer,
                     RTCSessionDescription)
+from nacl.public import PrivateKey, PublicKey, Box
 
 from .identity import Identity
 from .signaling import Signaling
@@ -24,6 +26,8 @@ from .config import stun_url
 
 STUN = stun_url()
 BIND_PREFIX = b"yaw/2 bind"
+EKEY_PREFIX = b"yaw/2.1 ekey"      # signed context for the ephemeral-key message
+FS_TIMEOUT = 2.0                   # wait for peer's ekey before falling back to 2.0
 CHUNK = 64 * 1024
 
 
@@ -34,7 +38,7 @@ def _dtls_fp(sdp: str) -> bytes:
 
 class YawPeer:
     def __init__(self, identity: Identity, signaling: Signaling, peer_id: str, on_event,
-                 share=None, nick=""):
+                 share=None, nick="", fs=True):
         self.id = identity
         self.sig = signaling
         self.peer_id = peer_id
@@ -47,6 +51,16 @@ class YawPeer:
         self._recv = {}   # xid -> {name,size,sha,buf}
         self._send = {}   # xid -> bytes
 
+        # yaw/2.1 forward-secret signaling: per-session ephemeral X25519 (§3'/§6').
+        self.fs = fs                                  # are we willing to do FS?
+        self._esk = PrivateKey.generate() if fs else None
+        self._epk = self._esk.public_key if fs else None
+        self.peer_epk = None                          # peer's ephemeral pubkey, once known
+        self.session_fs = False                       # did this session end up forward-secret
+        self._ekey_sent = False
+        self._offer_pending = False
+        self._offered = False
+
         @self.pc.on("datachannel")
         def _on_dc(channel):
             self._wire(channel)
@@ -55,20 +69,104 @@ class YawPeer:
         def _on_conn_state():
             self.on_event("status", peer=self.peer_id, state=self.pc.connectionState)
 
+    # -- signaling seal/open (yaw/2.1 §5.4'/§6') -------------------------------
+    def _seal(self, obj, prefer_eph):
+        """Seal a signaling payload; ephemeral if we can, else static (2.0)."""
+        data = json.dumps(obj).encode()
+        if prefer_eph and self.peer_epk is not None and self._esk is not None:
+            enc = Box(self._esk, self.peer_epk).encrypt(data, os.urandom(24))
+            return base64.b64encode(bytes(enc)).decode(), True
+        return self.id.seal(self.peer_id, data), False
+
+    def _open(self, box):
+        """Return (plaintext, used_ephemeral). Tries ephemeral then static — a wrong
+        key fails the Poly1305 tag cleanly, so try-both is safe (§5.4')."""
+        if self.peer_epk is not None and self._esk is not None:
+            try:
+                return bytes(Box(self._esk, self.peer_epk).decrypt(base64.b64decode(box))), True
+            except Exception:
+                pass
+        try:
+            return self.id.open(self.peer_id, box), False
+        except Exception:
+            return None, False
+
+    async def _send_ekey(self):
+        if not self.fs or self._ekey_sent:
+            return
+        self._ekey_sent = True
+        epk_raw = bytes(self._epk)
+        sig = self.id.sign(EKEY_PREFIX + bytes.fromhex(self.id.id)
+                           + bytes.fromhex(self.peer_id) + epk_raw)
+        msg = {"kind": "ekey", "v": "yaw/2.1", "epk": epk_raw.hex(), "sig": sig.hex()}
+        box, _ = self._seal(msg, prefer_eph=False)          # ekey is always static
+        await self.sig.send_to(self.peer_id, box)
+
+    async def _on_ekey(self, obj):
+        if not self.fs or self.peer_epk is not None:
+            return
+        try:
+            epk_raw = bytes.fromhex(obj.get("epk", ""))
+            sig = bytes.fromhex(obj.get("sig", ""))
+            signed = EKEY_PREFIX + bytes.fromhex(self.peer_id) + bytes.fromhex(self.id.id) + epk_raw
+            if len(epk_raw) != 32 or not Identity.verify(self.peer_id, signed, sig):
+                return
+            self.peer_epk = PublicKey(epk_raw)
+        except Exception:
+            return
+        await self._send_ekey()                              # reciprocate (idempotent)
+        if self._offer_pending:                              # offerer was waiting for epk
+            await self._do_offer()
+
     # -- offer/answer ----------------------------------------------------------
     async def start_offer(self):
+        if self.fs:
+            await self._send_ekey()
+            self._offer_pending = True
+            asyncio.ensure_future(self._offer_timer())
+            if self.peer_epk is not None:                    # peer's ekey already arrived
+                await self._do_offer()
+        else:
+            await self._do_offer()
+
+    async def _offer_timer(self):
+        await asyncio.sleep(FS_TIMEOUT)
+        if self._offer_pending:                              # no ekey -> 2.0 fallback
+            await self._do_offer()
+
+    async def _do_offer(self):
+        if self._offered:
+            return
+        self._offered = True
+        self._offer_pending = False
         self.dc = self.pc.createDataChannel("yaw")
         self._wire(self.dc)
         await self.pc.setLocalDescription(await self.pc.createOffer())
-        await self.sig.send_to(self.peer_id, {"kind": "offer", "sdp": self.pc.localDescription.sdp})
+        box, eph = self._seal({"kind": "offer", "sdp": self.pc.localDescription.sdp}, prefer_eph=self.fs)
+        self.session_fs = eph
+        await self.sig.send_to(self.peer_id, box)
 
-    async def handle_signal(self, obj: dict):
+    async def on_box(self, box):
+        """Open one relayed box and dispatch (replaces 2.0's handle_signal)."""
+        plain, used_eph = self._open(box)
+        if plain is None:
+            return
+        try:
+            obj = json.loads(plain)
+        except Exception:
+            return
         kind = obj.get("kind")
-        if kind == "offer":
+        if kind == "ekey":
+            await self._on_ekey(obj)
+        elif kind == "offer":
             await self.pc.setRemoteDescription(RTCSessionDescription(obj["sdp"], "offer"))
             await self.pc.setLocalDescription(await self.pc.createAnswer())
-            await self.sig.send_to(self.peer_id, {"kind": "answer", "sdp": self.pc.localDescription.sdp})
+            box2, eph = self._seal({"kind": "answer", "sdp": self.pc.localDescription.sdp},
+                                   prefer_eph=used_eph)       # answer matches the offer's keying
+            self.session_fs = eph
+            await self.sig.send_to(self.peer_id, box2)
         elif kind == "answer":
+            self.session_fs = used_eph
             await self.pc.setRemoteDescription(RTCSessionDescription(obj["sdp"], "answer"))
 
     # -- channel wiring --------------------------------------------------------
@@ -121,7 +219,7 @@ class YawPeer:
             self.verified = ok
             self.peer_caps = m.get("caps", [])
             self.on_event("connected", peer=self.peer_id, verified=ok,
-                          nick=m.get("nick"), caps=self.peer_caps)
+                          nick=m.get("nick"), caps=self.peer_caps, fs=self.session_fs)
         elif t == "chat":
             self.on_event("chat", peer=self.peer_id, text=m.get("text", ""))
         elif t == "browse":
@@ -199,7 +297,7 @@ class Node:
     RETRY_AFTER = 12    # re-offer a link that hasn't verified within this many seconds
 
     def __init__(self, url: str, identity: Identity, net: str, on_event,
-                 share_dir=None, keyring=None, nick=""):
+                 share_dir=None, keyring=None, nick="", forward_secret=True):
         self.id = identity
         self.net = net
         self.on_event = on_event
@@ -208,6 +306,7 @@ class Node:
         self.share = FileShare(share_dir) if share_dir else None
         self.keyring = keyring
         self.nick = nick
+        self.fs = forward_secret        # yaw/2.1 forward-secret signaling (opportunistic)
 
     def _trusted(self, pid: str) -> bool:
         return self.keyring is None or self.keyring.trusts(pid)
@@ -232,7 +331,8 @@ class Node:
                 asyncio.ensure_future(old.pc.close())
             except Exception:
                 pass
-        peer = YawPeer(self.id, self.sig, pid, self.on_event, share=self.share, nick=self.nick)
+        peer = YawPeer(self.id, self.sig, pid, self.on_event, share=self.share,
+                       nick=self.nick, fs=self.fs)
         peer.created = time.monotonic()
         self.peers[pid] = peer
         return peer
@@ -260,19 +360,14 @@ class Node:
     async def _on_leave(self, pid):
         self.peers.pop(pid, None)
 
-    async def _on_from(self, frm, obj):
+    async def _on_from(self, frm, box):
         if not self._trusted(frm):
             self.on_event("untrusted", peer=frm)
             return
-        kind = obj.get("kind")
-        if kind == "offer":
-            existing = self.peers.get(frm)
-            peer = existing if (existing is not None and existing.verified) else self._new_peer(frm)
-            await peer.handle_signal(obj)
-        elif kind == "answer":
-            peer = self.peers.get(frm)
-            if peer is not None:
-                await peer.handle_signal(obj)
+        peer = self.peers.get(frm)
+        if peer is None or peer.pc.connectionState in ("failed", "closed"):
+            peer = self._new_peer(frm)     # fresh session for a first/retried connection
+        await peer.on_box(box)
 
     async def _reconcile(self):
         while True:

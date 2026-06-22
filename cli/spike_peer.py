@@ -96,7 +96,8 @@ async def main():
         if kind == "connected":
             shares = "share" in (kw.get("caps") or [])
             hint = "" if kr.name(kw["peer"]) else (f"  (calls itself '{kw['nick']}')" if kw.get("nick") else "")
-            print(f"[+] {label(kw['peer'])} connected  verified={kw['verified']}"
+            fs = "forward-secret" if kw.get("fs") else "not forward-secret (2.0 peer)"
+            print(f"[+] {label(kw['peer'])} connected  verified={kw['verified']}  [{fs}]"
                   f"{'  (shares files)' if shares else ''}{hint}")
         elif kind == "untrusted":
             if kw["peer"] not in warned:           # one nudge per id
