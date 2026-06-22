@@ -37,10 +37,15 @@ web/CLI code; this is just a shell.
 
 ```sh
 cd desktop/src-tauri
-cargo tauri icon ../../path/to/logo.png   # once, to create icons (optional for dev)
-cargo tauri dev                           # run a dev window
-cargo tauri build                         # produce a signed-able app bundle
+cargo tauri icon ../app-icon.png   # once — generates icons/ (REQUIRED; the build
+                                   # embeds them). Replace app-icon.png with your own.
+cargo tauri dev                    # run a dev window
+cargo tauri build                  # produce a signed-able app bundle
 ```
+
+> The repo ships a placeholder `desktop/app-icon.png`; the generated `icons/` set is
+> gitignored, so run `cargo tauri icon` once after cloning (or whenever you change the
+> logo).
 
 Because `frontendDist` points straight at `../../web` (static files), there's no JS
 build step — the app loads the same client friends use in the browser.

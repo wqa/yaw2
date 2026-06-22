@@ -2,7 +2,6 @@
 src-tauri/target/
 # Tauri v2 generated code (schemas, etc.)
 src-tauri/gen/
-# Generated icons (regenerate with `cargo tauri icon`)
-src-tauri/icons/*.png
-src-tauri/icons/*.icns
-src-tauri/icons/*.ico
+# Generated icons (regenerate with `cargo tauri icon`) — keep only the README
+src-tauri/icons/*
+!src-tauri/icons/README.md
