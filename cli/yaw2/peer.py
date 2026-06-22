@@ -208,6 +208,7 @@ class YawPeer:
                 st = self._recv.get(xid)
                 if st is not None and isinstance(message, (bytes, bytearray)):
                     st["buf"] += message
+                    self._maybe_finish_file(xid)   # bytes can arrive after file-done
 
     async def _send_hello(self):
         if os.environ.get("YAW_DBG"):
@@ -251,16 +252,25 @@ class YawPeer:
             self.on_event("no-file", peer=self.peer_id, name=m.get("name", ""))
         elif t == "file-offer":
             self._recv[m["xid"]] = {"name": m["name"], "size": m["size"],
-                                    "sha": m["sha256"], "buf": bytearray()}
+                                    "sha": m["sha256"], "buf": bytearray(), "done": False}
             self.dc.send(json.dumps({"type": "file-accept", "xid": m["xid"]}))
         elif t == "file-accept":
             asyncio.ensure_future(self._stream_file(m["xid"]))
         elif t == "file-done":
-            st = self._recv.pop(m["xid"], None)
+            st = self._recv.get(m["xid"])
             if st is not None:
-                ok = hashlib.sha256(st["buf"]).hexdigest() == m["sha256"]
-                self.on_event("file-recv", peer=self.peer_id, name=st["name"],
-                              size=len(st["buf"]), ok=ok, data=bytes(st["buf"]))
+                st["done"] = True
+                st["sha"] = m["sha256"]
+                self._maybe_finish_file(m["xid"])
+
+    def _maybe_finish_file(self, xid):
+        st = self._recv.get(xid)
+        if st is None or not st["done"] or len(st["buf"]) < st["size"]:
+            return                              # need file-done AND all bytes
+        self._recv.pop(xid, None)
+        ok = hashlib.sha256(st["buf"]).hexdigest() == st["sha"]
+        self.on_event("file-recv", peer=self.peer_id, name=st["name"],
+                      size=len(st["buf"]), ok=ok, data=bytes(st["buf"]))
 
     # -- application API -------------------------------------------------------
     def send_chat(self, text: str):

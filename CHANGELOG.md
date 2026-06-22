@@ -4,6 +4,18 @@ All notable changes to YAW (Yet Another WASTE) are recorded here.
 
 ## [Unreleased]
 
+### 2026-06-22 — A tale of two channels
+The herald and the wagon took different roads, and the herald kept arriving first.
+
+- **Fixed: large / concurrent file transfers failed the hash check.** The bulk bytes
+  ride a dedicated `f:<xid>` DataChannel while `file-done` rides the control channel —
+  two independent SCTP streams with **no ordering between them**. For a multi-MB file
+  the small `file-done` overtook the data still in flight, so the receiver hashed a
+  half-arrived buffer and every big file "FAILED hash check" (small ones, like the
+  tests, drained in time and passed). The receiver now finalizes only once it has
+  **both** `file-done` **and** all `size` bytes. Web + CLI; spec §11 updated;
+  `cli/test_filerace_live.py` pulls four 2–5 MB files at once, all hash-verified.
+
 ### 2026-06-22 — Forward secrecy, everywhere
 On this day in 1633 the Inquisition made Galileo recant heliocentrism on paper — yet
 the planets kept their orbits no matter what anyone could later be compelled to say.

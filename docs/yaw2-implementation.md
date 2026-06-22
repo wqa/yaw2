@@ -372,9 +372,15 @@ file-done {xid, sha256} ──────────────────�
 - `sha256` = hex SHA-256 of the **whole file**. **Test vector:** `sha256("hello yaw\n")
   = 9a060d65a4649aedc3156ab556da46144538563c9b8a5a389f8a66f520517ac1`.
 - The dedicated channel's label is **exactly** `f:` + `xid`. Binary frames are the raw
-  file bytes in order; the receiver concatenates them, then verifies the hash on
-  `file-done`. Chunk size is **65536** bytes; the sender SHOULD throttle on
-  `bufferedAmount`.
+  file bytes in order; the receiver concatenates them. Chunk size is **65536** bytes;
+  the sender SHOULD throttle on `bufferedAmount`.
+- **Cross-channel ordering (critical):** the bulk bytes ride `f:<xid>` while `file-done`
+  rides the `yaw` control channel — **two independent SCTP streams with no ordering
+  between them**. For a large file, the small `file-done` can arrive *before* the last
+  bytes. The receiver therefore MUST finalize (hash-check) only once it has **both**
+  received `file-done` **and** accumulated the full `size` bytes from `file-offer` —
+  never hash immediately on `file-done`. (Finalizing on `file-done` alone makes large
+  transfers fail the hash check while small ones pass.)
 
 ---
 

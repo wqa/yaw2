@@ -310,7 +310,13 @@ const YAW = (() => {
       } else if (channel.label.startsWith('f:')) {
         const xid = channel.label.slice(2);
         channel.binaryType = 'arraybuffer';
-        channel.onmessage = (ev) => { const st = this._recv[xid]; if (st) st.buf.push(new Uint8Array(ev.data)); };
+        channel.onmessage = (ev) => {
+          const st = this._recv[xid];
+          if (!st) return;
+          st.buf.push(new Uint8Array(ev.data));
+          st.have += ev.data.byteLength;
+          this._maybeFinishFile(xid);   // bytes may arrive after file-done (separate channel)
+        };
       }
     }
     _sendHello() {
@@ -338,20 +344,24 @@ const YAW = (() => {
         else this.sendFile(f);
       } else if (m.type === 'no-file') this.on('no-file', { peer: this.peerId, name: m.name });
       else if (m.type === 'file-offer') {
-        this._recv[m.xid] = { name: m.name, size: m.size, sha: m.sha256, buf: [] };
+        this._recv[m.xid] = { name: m.name, size: m.size, sha: m.sha256, buf: [], have: 0, done: false };
         this.dc.send(JSON.stringify({ type: 'file-accept', xid: m.xid }));
         this.on('file-incoming', { peer: this.peerId, name: m.name, size: m.size });
       } else if (m.type === 'file-accept') this._stream(m.xid);
       else if (m.type === 'file-done') {
-        const st = this._recv[m.xid]; delete this._recv[m.xid];
-        if (st) {
-          const blob = new Blob(st.buf);
-          blob.arrayBuffer().then((ab) => {
-            const ok = S.to_hex(S.crypto_hash_sha256(new Uint8Array(ab))) === m.sha256;
-            this.on('file-recv', { peer: this.peerId, name: st.name, size: ab.byteLength, ok, blob });
-          });
-        }
+        const st = this._recv[m.xid];
+        if (st) { st.done = true; st.sha = m.sha256; this._maybeFinishFile(m.xid); }
       }
+    }
+    _maybeFinishFile(xid) {
+      const st = this._recv[xid];
+      if (!st || !st.done || st.have < st.size) return;   // need file-done AND all bytes
+      delete this._recv[xid];
+      const blob = new Blob(st.buf);
+      blob.arrayBuffer().then((ab) => {
+        const ok = S.to_hex(S.crypto_hash_sha256(new Uint8Array(ab))) === st.sha;
+        this.on('file-recv', { peer: this.peerId, name: st.name, size: ab.byteLength, ok, blob });
+      });
     }
     sendChat(text) { if (this.dc) this.dc.send(JSON.stringify({ type: 'chat', text })); }
     async sendFile(file) {
