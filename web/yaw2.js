@@ -71,26 +71,41 @@ const YAW = (() => {
     return { id, nick };
   }
 
+  // Seed storage: the OS keychain when running inside Tauri (survives "clear
+  // browsing data", no eviction), else the browser's localStorage. In a plain
+  // browser `_invoke` is null, so this is exactly the old localStorage behaviour.
+  const _invoke = (typeof window !== 'undefined' && window.__TAURI__ && window.__TAURI__.core)
+    ? window.__TAURI__.core.invoke : null;
+  const inTauri = !!_invoke;
+  async function seedGet() {
+    if (_invoke) { try { const s = await _invoke('key_load', { account: 'seed' }); if (s) return s; } catch (e) {} }
+    return localStorage.getItem('yaw2_seed');
+  }
+  async function seedSet(hex) {
+    if (_invoke) { try { await _invoke('key_save', { account: 'seed', secret: hex }); return; } catch (e) {} }
+    localStorage.setItem('yaw2_seed', hex);
+  }
+
   class Identity {
     constructor(kp) {
       this.pub = kp.publicKey; this.priv = kp.privateKey;
       this.id = S.to_hex(this.pub);
       this.curvePriv = S.crypto_sign_ed25519_sk_to_curve25519(this.priv);
     }
-    static load() {
-      let seedHex = localStorage.getItem('yaw2_seed');
+    static async load() {
+      let seedHex = await seedGet();
       let kp;
       if (seedHex) kp = S.crypto_sign_seed_keypair(S.from_hex(seedHex));
       else {
         kp = S.crypto_sign_keypair();
-        localStorage.setItem('yaw2_seed', S.to_hex(kp.privateKey.slice(0, 32)));
+        await seedSet(S.to_hex(kp.privateKey.slice(0, 32)));
       }
       return new Identity(kp);
     }
     exportBackup(passphrase) { return exportSeed(this.priv.slice(0, 32), passphrase); }
-    static importBackup(backup, passphrase) {
+    static async importBackup(backup, passphrase) {
       const seed = importSeed(backup, passphrase);   // throws on wrong passphrase
-      localStorage.setItem('yaw2_seed', S.to_hex(seed));
+      await seedSet(S.to_hex(seed));
       return new Identity(S.crypto_sign_seed_keypair(seed));
     }
     get short() { return this.id.slice(0, 16).replace(/(.{4})/g, '$1 ').trim(); }
@@ -377,5 +392,5 @@ const YAW = (() => {
     forget(id) { return this.keyring.remove(id); }
   }
 
-  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick, diagnose };
+  return { ready, netHash, Identity, Keyring, Node, makeCard, parseCard, cleanNick, diagnose, inTauri };
 })();

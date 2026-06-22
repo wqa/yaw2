@@ -50,9 +50,9 @@ cargo tauri build                  # produce a signed-able app bundle
 Because `frontendDist` points straight at `../../web` (static files), there's no JS
 build step — the app loads the same client friends use in the browser.
 
-## Next step: store the identity in the OS keychain
+## Identity in the OS keychain (wired up)
 
-`src/main.rs` exposes three commands the frontend can call:
+`src/lib.rs` exposes three commands the frontend calls:
 
 | Command | Effect |
 |---|---|
@@ -60,29 +60,17 @@ build step — the app loads the same client friends use in the browser.
 | `key_load(account)` | read it back (`null` if absent) |
 | `key_delete(account)` | remove it |
 
-To use them, the web client should prefer the keychain when running inside Tauri.
-Sketch (in `web/yaw2.js`, guarded so the browser is unaffected):
+The web client (`web/yaw2.js`) already uses them: a small seed-store abstraction
+(`seedGet`/`seedSet`) reads/writes the identity seed via the keychain when
+`window.__TAURI__` is present, and falls back to `localStorage` in a plain browser —
+so `Identity.load()`/`importBackup()` are async, and the browser behaviour is
+unchanged. `withGlobalTauri: true` (in `tauri.conf.json`) exposes `window.__TAURI__`
+to the bundler-less frontend. Inside the desktop app the key therefore survives
+"clear browsing data" and webview eviction.
 
-```js
-const inTauri = typeof window !== 'undefined' && !!window.__TAURI__;
-const invoke  = inTauri ? window.__TAURI__.core.invoke : null;
-
-// load: try keychain, else localStorage
-async function loadSeedHex() {
-  if (inTauri) { const s = await invoke('key_load', { account: 'seed' }); if (s) return s; }
-  return localStorage.getItem('yaw2_seed');
-}
-// save: keychain in Tauri, localStorage in the browser
-async function saveSeedHex(hex) {
-  if (inTauri) return invoke('key_save', { account: 'seed', secret: hex });
-  localStorage.setItem('yaw2_seed', hex);
-}
-```
-
-This requires making `Identity.load()` async (keychain access is async) and awaiting it
-at startup — a small but real refactor that should be browser-tested. The
-passphrase-encrypted `*.yawkey` backup ([../KEYHANDLING.md](../KEYHANDLING.md)) still
-works regardless and remains the portable, cross-client copy.
+The passphrase-encrypted `*.yawkey` backup ([../KEYHANDLING.md](../KEYHANDLING.md))
+still works regardless and remains the portable, cross-client copy. `key_delete` is
+available for a future "forget this device" action.
 
 ## Notes
 

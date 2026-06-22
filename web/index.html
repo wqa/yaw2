@@ -205,7 +205,7 @@
       $('join').disabled = true;
       try {
         await YAW.ready();
-        ident = YAW.Identity.load();
+        ident = await YAW.Identity.load();
         const net = YAW.netHash($('net').value.trim());
         node = new YAW.Node($('url').value.trim(), ident, net, onEvent);
         refreshMe(); refreshKeys();
@@ -288,7 +288,7 @@
       if (!pass) { $('keyfile').value = ''; return; }
       try {
         await YAW.ready();
-        ident = YAW.Identity.importBackup(JSON.parse(await f.text()), pass);
+        ident = await YAW.Identity.importBackup(JSON.parse(await f.text()), pass);
         refreshMe();
         line('sys', `identity restored: ${ident.short} — ${node ? 'reconnect' : 'connect'} to use it.`);
       } catch (e) { line('sys', 'restore failed (wrong passphrase or bad file): ' + esc(e.message)); }
@@ -316,8 +316,9 @@
     (async () => {
       try {
         await YAW.ready();
-        ident = YAW.Identity.load();
+        ident = await YAW.Identity.load();
         refreshMe();
+        if (YAW.inTauri) line('sys', '🔐 desktop app — your key is stored in the OS keychain.');
       } catch (e) { /* sodium not ready yet; join() will load it */ }
     })();
   </script>
